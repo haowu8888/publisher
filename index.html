@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Publisher 一键分发</title>
+    <link rel="stylesheet" href="./src/style.css" />
+  </head>
+  <body>
+    <aside class="nav">
+      <div class="brand">
+        <span class="logo">P</span>
+        <div>
+          <strong>Publisher</strong>
+          <small>一键分发</small>
+        </div>
+      </div>
+      <button class="nav-item" data-view="library">素材库</button>
+      <button class="nav-item" data-view="accounts">账号</button>
+      <button class="nav-item" data-view="tasks">任务 <span id="running-badge" class="badge" hidden></span></button>
+      <button class="nav-item" data-view="schedule">定时发布 <span id="schedule-on" class="badge" hidden>开</span></button>
+      <button class="nav-item" data-view="settings">设置</button>
+      <div class="nav-foot muted">视频与文章自动发布到各平台</div>
+    </aside>
+    <main id="view"></main>
+    <div id="toast" class="toast" hidden></div>
+    <script type="module" src="./src/main.ts"></script>
+  </body>
+</html>

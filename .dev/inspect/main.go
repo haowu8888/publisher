@@ -1,0 +1,97 @@
+// Command inspect runs JavaScript in a tab of the app's automation Chrome,
+// to study a platform's publish page while writing its automation. It runs
+// on the Windows host, beside the running app:
+//
+//	go run ./.dev/inspect <url or tab URL substring> <base64 js> [screenshot.png]
+//
+// A script "upload:<selector>|<file>" instead sets a file input's files,
+// "shadow:<selector>" prints the element's shadow root, closed or not, and
+// "cookies:<name,...>" prints the profile's cookies of those names, and
+// "close" closes the tab and "shadowclick:<host>|<selector>" clicks an
+// element in a host's shadow root, closed or not.
+//
+// A first argument starting with "http" opens a new tab; otherwise it picks
+// the open tab whose URL contains it.
+package main
+
+import (
+	"encoding/base64"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"github.com/go-rod/rod"
+	"github.com/go-rod/rod/lib/proto"
+)
+
+func main() {
+	// A page blocked by a native dialog never answers; give up instead of hanging.
+	time.AfterFunc(30*time.Second, func() { fmt.Println("timeout: page not responding (native dialog?)"); os.Exit(2) })
+	data, err := os.ReadFile(filepath.Join(os.Getenv("APPDATA"), "Publisher", "chrome-profile", "DevToolsActivePort"))
+	if err != nil {
+		panic(err)
+	}
+	port, path, _ := strings.Cut(strings.TrimSpace(string(data)), "\n")
+	b := rod.New().ControlURL("ws://127.0.0.1:" + strings.TrimSpace(port) + strings.TrimSpace(path)).MustConnect()
+
+	var page *rod.Page
+	if strings.HasPrefix(os.Args[1], "http") {
+		page = b.MustPage(os.Args[1])
+		page.MustWaitLoad()
+		time.Sleep(4 * time.Second)
+	} else {
+		for _, p := range b.MustPages() {
+			if info, err := p.Info(); err == nil && info.Type == proto.TargetTargetInfoTypePage && strings.Contains(info.URL, os.Args[1]) {
+				page = p
+			}
+		}
+		if page == nil {
+			panic("no tab matches " + os.Args[1])
+		}
+	}
+	fmt.Println("url:", page.MustInfo().URL)
+	if len(os.Args) > 2 && os.Args[2] != "" {
+		js, err := base64.StdEncoding.DecodeString(os.Args[2])
+		if err != nil {
+			panic(err)
+		}
+		if string(js) == "close" {
+			page.MustClose()
+			fmt.Println("closed")
+			return
+		}
+		if arg, ok := strings.CutPrefix(string(js), "shadowclick:"); ok {
+			host, sel, _ := strings.Cut(arg, "|")
+			page.MustElement(host).MustShadowRoot().MustElement(sel).MustEval(`() => this.click()`)
+			fmt.Println("clicked")
+			return
+		}
+		if names, ok := strings.CutPrefix(string(js), "cookies:"); ok {
+			for _, c := range b.MustGetCookies() {
+				if strings.Contains(","+names+",", ","+c.Name+",") {
+					fmt.Printf("%s domain=%s path=%s expires=%s len=%d httpOnly=%v\n", c.Name, c.Domain, c.Path,
+						time.Unix(int64(c.Expires), 0).Format(time.DateTime), len(c.Value), c.HTTPOnly)
+				}
+			}
+		} else if sel, ok := strings.CutPrefix(string(js), "shadow:"); ok {
+			fmt.Println(page.MustElement(sel).MustShadowRoot().MustHTML())
+		} else if sel, file, ok := strings.Cut(strings.TrimPrefix(string(js), "upload:"), "|"); ok && strings.HasPrefix(string(js), "upload:") {
+			// Several files go as "a;b", and "a;b|<js>" then prints <js>
+			// every half second for 15 seconds, to watch the upload.
+			files, watch, _ := strings.Cut(file, "|")
+			page.MustElement(sel).MustSetFiles(strings.Split(files, ";")...)
+			fmt.Println("uploaded", files)
+			for i := 0; watch != "" && i < 30; i++ {
+				fmt.Println(page.MustEval(`() => (` + watch + `)`).String())
+				time.Sleep(500 * time.Millisecond)
+			}
+		} else {
+			fmt.Println(page.MustEval(`async () => { const r = await (` + string(js) + `); return r === undefined ? null : r }`).String())
+		}
+	}
+	if len(os.Args) > 3 {
+		page.MustScreenshot(os.Args[3])
+	}
+}

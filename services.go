@@ -1,0 +1,829 @@
+package main
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"slices"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+
+	"publisher/internal/browser"
+	"publisher/internal/cookiesync"
+	"publisher/internal/platforms"
+	"publisher/internal/queue"
+	"publisher/internal/schedule"
+	"publisher/internal/store"
+
+	"github.com/egoist/mygo"
+	"github.com/go-rod/rod/lib/proto"
+)
+
+// TaskUpdated is sent whenever a publish task changes.
+var TaskUpdated = mygo.NewEvent[store.Task]("taskUpdated")
+
+// AccountUpdated is sent whenever a platform's login state is learned.
+var AccountUpdated = mygo.NewEvent[AccountInfo]("accountUpdated")
+
+// CookiesSynced is sent when the extension has brought over logins.
+var CookiesSynced = mygo.NewEvent[SyncResult]("cookiesSynced")
+
+// ScheduleRan is sent after each run of the schedule.
+var ScheduleRan = mygo.NewEvent[store.Schedule]("scheduleRan")
+
+// Library manages the videos and articles to publish.
+type Library struct {
+	store *store.Store
+}
+
+// List returns all materials, newest first.
+func (l *Library) List() []store.Material { return l.store.Materials() }
+
+var (
+	videoExts   = []string{"mp4", "mov", "mkv", "flv", "webm", "avi", "m4v"}
+	articleExts = []string{"md", "markdown", "txt"}
+)
+
+// ImportVideos asks for video files and adds each as a material.
+func (l *Library) ImportVideos(ctx context.Context) ([]store.Material, error) {
+	paths, err := mygo.Dialog.Open(mygo.OpenDialogOptions{
+		Parent:   mygo.CallerWindow(ctx),
+		Title:    "选择视频",
+		Multiple: true,
+		Filters:  []mygo.FileFilter{{Name: "视频", Extensions: videoExts}},
+	})
+	if err != nil {
+		return nil, err
+	}
+	return l.ImportPaths(paths)
+}
+
+// ImportArticles asks for Markdown or text files and adds each as a
+// material.
+func (l *Library) ImportArticles(ctx context.Context) ([]store.Material, error) {
+	paths, err := mygo.Dialog.Open(mygo.OpenDialogOptions{
+		Parent:   mygo.CallerWindow(ctx),
+		Title:    "选择文章",
+		Multiple: true,
+		Filters:  []mygo.FileFilter{{Name: "文章", Extensions: articleExts}},
+	})
+	if err != nil {
+		return nil, err
+	}
+	return l.ImportPaths(paths)
+}
+
+// ImportPaths adds videos and articles, such as files dropped on the
+// window, telling them apart by extension and skipping other files, and
+// those the library already has: a second material of a file would be
+// published a second time.
+func (l *Library) ImportPaths(paths []string) ([]store.Material, error) {
+	added := []store.Material{}
+	var had []string
+	for _, p := range paths {
+		if l.store.HasFile(p) {
+			had = append(had, filepath.Base(p))
+			continue
+		}
+		m, ok, err := newMaterial(p)
+		if err != nil {
+			return added, err
+		}
+		if !ok {
+			continue
+		}
+		if err := l.store.PutMaterial(m); err != nil {
+			return added, err
+		}
+		added = append(added, m)
+	}
+	if len(added) == 0 && len(had) > 0 {
+		return added, fmt.Errorf("已经在素材库里，没有重复导入：%s", strings.Join(had, "、"))
+	}
+	return added, nil
+}
+
+// FolderInfo is a folder the library syncs from and the files in it that
+// are new.
+type FolderInfo struct {
+	Dir string `json:"dir"`
+	New int    `json:"new"`
+	// Files are the names of the new files, in the order they would sync.
+	Files []string `json:"files,omitempty"`
+	// Error is why the folder could not be read.
+	Error string `json:"error,omitempty"`
+}
+
+// Folders returns the folders the library syncs from.
+func (l *Library) Folders() []FolderInfo {
+	out := []FolderInfo{}
+	for _, dir := range l.store.Folders() {
+		info := FolderInfo{Dir: dir}
+		files, err := l.newFiles(dir, 0)
+		info.New = len(files)
+		for _, f := range files {
+			info.Files = append(info.Files, filepath.Base(f))
+		}
+		if err != nil {
+			info.Error = err.Error()
+		}
+		out = append(out, info)
+	}
+	return out
+}
+
+// AddFolder asks for a folder to sync from as well.
+func (l *Library) AddFolder(ctx context.Context) ([]FolderInfo, error) {
+	paths, err := mygo.Dialog.Open(mygo.OpenDialogOptions{
+		Parent:    mygo.CallerWindow(ctx),
+		Title:     "添加要同步的文件夹",
+		Directory: true,
+	})
+	if err == nil && len(paths) > 0 {
+		err = l.store.AddFolder(paths[0])
+	}
+	return l.Folders(), err
+}
+
+// RemoveFolder stops syncing from a folder; its materials stay.
+func (l *Library) RemoveFolder(dir string) ([]FolderInfo, error) {
+	err := l.store.RemoveFolder(dir)
+	return l.Folders(), err
+}
+
+// SyncFolders adds the videos and Markdown articles in the folders that
+// were never added before: folder by folder, each in name order with
+// episode numbers by value, so the schedule takes them first to last. A
+// file is added once only: deleting its material does not bring it back.
+// A folder that cannot be read is skipped; Folders tells why.
+func (l *Library) SyncFolders() ([]store.Material, error) {
+	if len(l.store.Folders()) == 0 {
+		return nil, errors.New("还没有添加同步文件夹")
+	}
+	return l.sync(0)
+}
+
+// settleTime is how long a file must have been left alone before the
+// schedule's own sync takes it: one still being written, or still waiting
+// for its caption, would be published as it is.
+const settleTime = 5 * time.Minute
+
+// sync is SyncFolders, leaving for later the files changed within quiet.
+// A file that cannot be read is left for later too, and is the error only
+// when nothing else came in.
+func (l *Library) sync(quiet time.Duration) ([]store.Material, error) {
+	added := []store.Material{}
+	var failed []string
+	for _, dir := range l.store.Folders() {
+		files, _ := l.newFiles(dir, quiet)
+		for _, p := range files {
+			m, _, err := newMaterial(p)
+			if err != nil {
+				failed = append(failed, err.Error())
+				continue
+			}
+			added = append(added, m)
+		}
+	}
+	if len(added) == 0 {
+		if len(failed) > 0 {
+			return added, fmt.Errorf("有文件读不了，没有导入：%s", strings.Join(failed, "；"))
+		}
+		return added, nil
+	}
+	return added, l.store.AddMaterials(added...)
+}
+
+// fresh reports whether the file at p, or one that goes with it, changed
+// within quiet: a video's caption and cover, an article's folder of
+// pictures.
+func fresh(p string, quiet time.Duration) bool {
+	stem := strings.TrimSuffix(p, filepath.Ext(p))
+	for _, f := range []string{p, stem + "_caption.txt", stem + ".txt", siblingCover(p), stem} {
+		if info, err := os.Stat(f); f != "" && err == nil && time.Since(info.ModTime()) < quiet {
+			return true
+		}
+	}
+	return false
+}
+
+// newFiles lists the files in dir, not its subfolders, to add on syncing,
+// but for those changed within quiet. Text files are left out: beside
+// videos they are captions.
+func (l *Library) newFiles(dir string, quiet time.Duration) ([]string, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, fmt.Errorf("读取同步文件夹失败：%w", err)
+	}
+	var videos, articles []string
+	created := map[string]time.Time{}
+	for _, e := range entries {
+		ext := strings.ToLower(strings.TrimPrefix(filepath.Ext(e.Name()), "."))
+		p := filepath.Join(dir, e.Name())
+		if !e.Type().IsRegular() || l.store.Imported(p) || (quiet > 0 && fresh(p, quiet)) {
+			continue
+		}
+		if slices.Contains(videoExts, ext) {
+			videos = append(videos, p)
+		} else if ext == "md" || ext == "markdown" {
+			if info, err := e.Info(); err == nil {
+				created[p] = createdAt(info)
+			}
+			articles = append(articles, p)
+		}
+	}
+	// Videos are numbered episodes (ep42 before ep100); articles are named
+	// by their titles, so they go by when they were made.
+	slices.SortFunc(videos, func(a, b string) int {
+		if naturalLess(a, b) {
+			return -1
+		}
+		return 1
+	})
+	slices.SortStableFunc(articles, func(a, b string) int { return created[a].Compare(created[b]) })
+	return append(videos, articles...), nil
+}
+
+// Update saves edits to a material's title, description, tags or body.
+func (l *Library) Update(m store.Material) (store.Material, error) {
+	old, err := l.store.Material(m.ID)
+	if err != nil {
+		return store.Material{}, err
+	}
+	old.Title = strings.TrimSpace(m.Title)
+	old.Description = m.Description
+	old.Body = m.Body
+	old.Tags = cleanTags(m.Tags)
+	old.Statement = m.Statement
+	if m.WeixinType != "" && m.WeixinType != "images" {
+		return store.Material{}, fmt.Errorf("未知的公众号发布形式 %q", m.WeixinType)
+	}
+	old.WeixinType = m.WeixinType
+	old.Collections = cleanCollections(m.Collections)
+	return old, l.store.PutMaterial(old)
+}
+
+// cleanCollections trims collection names and drops the empty ones, which
+// leave a platform to the default.
+func cleanCollections(c map[string]string) map[string]string {
+	out := map[string]string{}
+	for id, name := range c {
+		if name = strings.TrimSpace(name); name != "" {
+			out[id] = name
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// PickImages asks for an article's pictures, which replace its current
+// ones in natural order of their names. An empty result keeps them.
+func (l *Library) PickImages(ctx context.Context, id string) (store.Material, error) {
+	m, err := l.store.Material(id)
+	if err != nil {
+		return m, err
+	}
+	paths, err := mygo.Dialog.Open(mygo.OpenDialogOptions{
+		Parent:   mygo.CallerWindow(ctx),
+		Title:    "选择图片（可多选）",
+		Multiple: true,
+		Filters:  []mygo.FileFilter{{Name: "图片", Extensions: imageExts}},
+	})
+	if err != nil || len(paths) == 0 {
+		return m, err
+	}
+	slices.SortFunc(paths, func(a, b string) int {
+		if naturalLess(filepath.Base(a), filepath.Base(b)) {
+			return -1
+		}
+		return 1
+	})
+	// A cover taken from the old pictures, or gone, follows the new ones.
+	if _, err := os.Stat(m.CoverPath); m.CoverPath == "" || err != nil || slices.Contains(m.Images, m.CoverPath) {
+		m.CoverPath = paths[0]
+		if i := slices.IndexFunc(paths, func(p string) bool { return strings.EqualFold(baseName(p), "cover") }); i >= 0 {
+			m.CoverPath = paths[i]
+			paths = slices.Delete(paths, i, i+1)
+		}
+	}
+	m.Images = paths
+	return m, l.store.PutMaterial(m)
+}
+
+// ClearImages removes an article's pictures.
+func (l *Library) ClearImages(id string) (store.Material, error) {
+	m, err := l.store.Material(id)
+	if err != nil {
+		return m, err
+	}
+	m.Images = nil
+	return m, l.store.PutMaterial(m)
+}
+
+// PickCover asks for a cover image for a material. An empty result keeps
+// the current cover.
+func (l *Library) PickCover(ctx context.Context, id string) (store.Material, error) {
+	m, err := l.store.Material(id)
+	if err != nil {
+		return m, err
+	}
+	paths, err := mygo.Dialog.Open(mygo.OpenDialogOptions{
+		Parent:  mygo.CallerWindow(ctx),
+		Title:   "选择封面",
+		Filters: []mygo.FileFilter{{Name: "图片", Extensions: []string{"jpg", "jpeg", "png", "webp"}}},
+	})
+	if err != nil || len(paths) == 0 {
+		return m, err
+	}
+	m.CoverPath = paths[0]
+	return m, l.store.PutMaterial(m)
+}
+
+// ClearCover removes a material's cover.
+func (l *Library) ClearCover(id string) (store.Material, error) {
+	m, err := l.store.Material(id)
+	if err != nil {
+		return m, err
+	}
+	m.CoverPath = ""
+	return m, l.store.PutMaterial(m)
+}
+
+// Reveal shows a material's file in the file manager.
+func (l *Library) Reveal(id string) error {
+	m, err := l.store.Material(id)
+	if err != nil {
+		return err
+	}
+	p := m.VideoPath
+	if p == "" {
+		p = m.ArticlePath
+	}
+	mygo.Shell.ShowItemInFolder(p)
+	return nil
+}
+
+// Delete removes a material; its tasks and files stay. A material with a
+// task queued or running stays too.
+func (l *Library) Delete(id string) error { return l.store.DeleteMaterials(id) }
+
+// DeletePublished removes the materials published to every platform they
+// were sent to and returns their ids; their tasks and files stay.
+// A material with a publish still under way, or a platform it has not gone
+// out to yet, stays.
+func (l *Library) DeletePublished() ([]string, error) {
+	tasks := l.store.Tasks()
+	var ids []string
+	for _, m := range l.store.Materials() {
+		done := len(m.Published) > 0
+		for _, t := range tasks {
+			if t.MaterialID != m.ID {
+				continue
+			}
+			if _, ok := m.Published[t.Platform]; !ok || t.Status == store.StatusPending || t.Status == store.StatusRunning {
+				done = false
+			}
+		}
+		if done {
+			ids = append(ids, m.ID)
+		}
+	}
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	return ids, l.store.DeleteMaterials(ids...)
+}
+
+// AccountInfo is a platform with its login state.
+type AccountInfo struct {
+	ID        string       `json:"id"`
+	Name      string       `json:"name"`
+	Kinds     []store.Kind `json:"kinds"`
+	HomeURL   string       `json:"homeUrl"`
+	Ready     bool         `json:"ready"`
+	AutoNote  string       `json:"autoNote,omitempty"`
+	LoginNote string       `json:"loginNote,omitempty"`
+	// Collections is whether the platform adds materials to a collection.
+	Collections bool `json:"collections,omitempty"`
+	// Limits are the platform's title and text lengths.
+	Limits    map[string]platforms.Limits `json:"limits,omitempty"`
+	LoggedIn  bool                        `json:"loggedIn"`
+	CheckedAt time.Time                   `json:"checkedAt"`
+}
+
+// Accounts manages the logins to the platforms.
+type Accounts struct {
+	store   *store.Store
+	browser *browser.Browser
+	// syncErr tells why the server for the extension did not start.
+	syncErr error
+
+	syncMu sync.Mutex
+}
+
+func (a *Accounts) info(p *platforms.Platform) AccountInfo {
+	s := a.store.Accounts()[p.ID]
+	return AccountInfo{
+		ID: p.ID, Name: p.Name, Kinds: p.Kinds, HomeURL: p.HomeURL, Ready: p.Ready(), AutoNote: p.AutoNote,
+		Collections: p.Collections,
+		Limits:      p.Limits,
+		LoginNote:   p.LoginNote,
+		LoggedIn:    s.LoggedIn, CheckedAt: s.CheckedAt,
+	}
+}
+
+func (a *Accounts) record(p *platforms.Platform, loggedIn bool) AccountInfo {
+	a.store.SetAccount(p.ID, store.Account{LoggedIn: loggedIn, CheckedAt: time.Now()})
+	info := a.info(p)
+	AccountUpdated.Broadcast(info)
+	return info
+}
+
+// List returns every platform with its last known login state.
+func (a *Accounts) List() []AccountInfo {
+	var out []AccountInfo
+	for _, p := range platforms.All {
+		out = append(out, a.info(p))
+	}
+	return out
+}
+
+// Check finds out whether the browser is logged in to a platform. It opens
+// the browser if needed.
+func (a *Accounts) Check(ctx context.Context, id string) (AccountInfo, error) {
+	p := platforms.Get(id)
+	if p == nil {
+		return AccountInfo{}, errors.New("未知平台")
+	}
+	ok, err := p.CheckLogin(ctx, a.browser)
+	if err != nil {
+		return a.info(p), err
+	}
+	return a.record(p, ok), nil
+}
+
+// Login opens a platform's login page in the browser and returns once the
+// user has logged in, or after ten minutes.
+func (a *Accounts) Login(ctx context.Context, id string) (AccountInfo, error) {
+	p := platforms.Get(id)
+	if p == nil {
+		return AccountInfo{}, errors.New("未知平台")
+	}
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
+	defer cancel()
+	if err := p.Login(ctx, a.browser); err != nil {
+		if errors.Is(err, context.DeadlineExceeded) {
+			err = errors.New("等待登录超时")
+		}
+		return a.info(p), err
+	}
+	return a.record(p, true), nil
+}
+
+// SyncInfo tells how the login sync extension reaches the app.
+type SyncInfo struct {
+	Port         int    `json:"port"`
+	ExtensionDir string `json:"extensionDir"`
+	// Error is why the app cannot receive logins, if it cannot.
+	Error string `json:"error,omitempty"`
+}
+
+// SyncPlatform is a platform whose cookies a sync brought over. Status is
+// "loggedIn", "loggedOut", or "checking" while a page load decides it.
+type SyncPlatform struct {
+	ID     string `json:"id"`
+	Name   string `json:"name"`
+	Status string `json:"status"`
+}
+
+// SyncResult is the outcome of a sync, for the app and the extension.
+type SyncResult struct {
+	Imported  int            `json:"imported"`
+	Failed    int            `json:"failed"`
+	Platforms []SyncPlatform `json:"platforms"`
+}
+
+func extensionDir() string {
+	dir, _ := mygo.App.Path(mygo.PathResources)
+	return filepath.Join(dir, "extension")
+}
+
+// SyncInfo returns how to set up the login sync extension.
+func (a *Accounts) SyncInfo() SyncInfo {
+	info := SyncInfo{Port: cookiesync.Port, ExtensionDir: extensionDir()}
+	if a.syncErr != nil {
+		info.Error = "同步服务未启动（端口 " + strconv.Itoa(cookiesync.Port) + " 被占用？）：" + a.syncErr.Error()
+	}
+	return info
+}
+
+// OpenExtensionDir shows the extension's folder, to load it in Chrome.
+func (a *Accounts) OpenExtensionDir() error { return mygo.Shell.OpenPath(extensionDir()) }
+
+// importCookies puts the cookies the extension sent into the automation
+// browser, then checks the logins of the platforms they belong to.
+func (a *Accounts) importCookies(cookies []cookiesync.Cookie) (any, error) {
+	a.syncMu.Lock()
+	defer a.syncMu.Unlock()
+	res := SyncResult{Platforms: []SyncPlatform{}}
+	if len(cookies) == 0 {
+		CookiesSynced.Broadcast(res)
+		return res, nil
+	}
+	b, err := a.browser.Get()
+	if err != nil {
+		return nil, err
+	}
+	// One at a time, so that a cookie Chrome refuses spoils no others.
+	for _, c := range cookies {
+		if b.SetCookies([]*proto.NetworkCookieParam{c.Param()}) != nil {
+			res.Failed++
+		} else {
+			res.Imported++
+		}
+	}
+	var slow []*platforms.Platform
+	for _, p := range platforms.All {
+		if !slices.ContainsFunc(cookies, func(c cookiesync.Cookie) bool { return p.Owns(c.Domain) }) {
+			continue
+		}
+		sp := SyncPlatform{ID: p.ID, Name: p.Name, Status: "checking"}
+		if p.Cookie != "" {
+			ok, _ := p.CheckLogin(context.Background(), a.browser)
+			a.record(p, ok)
+			sp.Status = map[bool]string{true: "loggedIn", false: "loggedOut"}[ok]
+		} else {
+			slow = append(slow, p)
+		}
+		res.Platforms = append(res.Platforms, sp)
+	}
+	CookiesSynced.Broadcast(res)
+	go func() {
+		for _, p := range slow {
+			if ok, err := p.CheckLogin(context.Background(), a.browser); err == nil {
+				a.record(p, ok)
+			}
+		}
+	}()
+	return res, nil
+}
+
+// CloseBrowser quits the automation browser.
+func (a *Accounts) CloseBrowser() { a.browser.Close() }
+
+// Publisher queues and tracks publish tasks.
+type Publisher struct {
+	store *store.Store
+	queue *queue.Queue
+}
+
+// Tasks returns all tasks, newest first.
+func (p *Publisher) Tasks() []store.Task { return p.store.Tasks() }
+
+// Publish queues a material for each platform. Mode "review" fills the
+// forms and leaves submitting to the user; "auto" submits them.
+func (p *Publisher) Publish(materialID string, platformIDs []string, mode store.Mode) ([]store.Task, error) {
+	if mode != store.ModeAuto {
+		mode = store.ModeReview
+	}
+	return p.queue.Add(materialID, platformIDs, mode)
+}
+
+// Retry queues a finished task again.
+func (p *Publisher) Retry(id string) error { return p.queue.Retry(id) }
+
+// Cancel stops a running or pending task.
+func (p *Publisher) Cancel(id string) error { return p.queue.Cancel(id) }
+
+// MarkDone records that the user submitted a reviewed task themselves.
+func (p *Publisher) MarkDone(id string) error {
+	t, err := p.store.UpdateTask(id, func(t *store.Task) {
+		if t.Status == store.StatusReview {
+			t.Status, t.Step = store.StatusSuccess, "已手动提交"
+		}
+	})
+	if err == nil {
+		TaskUpdated.Broadcast(t)
+	}
+	return err
+}
+
+// Delete removes a task that is not queued or running. A material it
+// published stays marked as published.
+func (p *Publisher) Delete(id string) error { return p.store.DeleteTask(id) }
+
+// ClearFinished removes tasks that are over, but for those waiting for
+// the user to submit them; materials stay marked as published.
+func (p *Publisher) ClearFinished() error { return p.store.ClearFinishedTasks() }
+
+func baseName(p string) string {
+	return strings.TrimSuffix(filepath.Base(p), filepath.Ext(p))
+}
+
+// siblingCover returns an image next to p with the same base name, or
+// that plus "_cover", so a cover exported beside a video is picked up on
+// import.
+func siblingCover(p string) string {
+	stem := strings.TrimSuffix(p, filepath.Ext(p))
+	for _, name := range []string{stem + "_cover", stem} {
+		for _, ext := range []string{".jpg", ".jpeg", ".png", ".webp"} {
+			if _, err := os.Stat(name + ext); err == nil {
+				return name + ext
+			}
+		}
+	}
+	return ""
+}
+
+// splitTitle takes a leading "# " heading off a Markdown document.
+func splitTitle(doc string) (title, body string) {
+	doc = strings.TrimPrefix(doc, "\ufeff")
+	trimmed := strings.TrimLeft(doc, "\r\n\t ")
+	if !strings.HasPrefix(trimmed, "# ") {
+		return "", doc
+	}
+	line, rest, _ := strings.Cut(trimmed, "\n")
+	return strings.TrimSpace(line[2:]), strings.TrimLeft(rest, "\r\n")
+}
+
+func cleanTags(tags []string) []string {
+	out := []string{}
+	seen := map[string]bool{}
+	for _, t := range tags {
+		t = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(t), "#"))
+		if t != "" && !seen[t] {
+			seen[t] = true
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
+// Scheduler sets up publishing the library's unpublished materials at set
+// times of day.
+type Scheduler struct {
+	store *store.Store
+	sched *schedule.Scheduler
+}
+
+// ScheduleInfo is the schedule with what it will do next.
+type ScheduleInfo struct {
+	Schedule store.Schedule `json:"schedule"`
+	// Next is the next run of each kind, if the schedule is on.
+	Next map[store.Kind]time.Time `json:"next"`
+	// Pending are the materials it will publish, the next first.
+	Pending []PendingMaterial `json:"pending"`
+}
+
+// PendingMaterial is a material waiting for the schedule, and the
+// platforms it will go to.
+type PendingMaterial struct {
+	ID        string     `json:"id"`
+	Title     string     `json:"title"`
+	Kind      store.Kind `json:"kind"`
+	Platforms []string   `json:"platforms"`
+}
+
+// Get returns the schedule.
+func (x *Scheduler) Get() ScheduleInfo { return x.info(x.store.Schedule()) }
+
+func (x *Scheduler) info(sc store.Schedule) ScheduleInfo {
+	info := ScheduleInfo{Schedule: sc, Next: map[store.Kind]time.Time{}, Pending: []PendingMaterial{}}
+	for _, k := range store.Kinds {
+		if sc.Enabled && len(sc.Platforms[k]) > 0 {
+			info.Next[k] = schedule.Next(sc, k, time.Now())
+		}
+	}
+	for _, m := range schedule.Pending(x.store, sc) {
+		info.Pending = append(info.Pending, PendingMaterial{ID: m.ID, Title: m.Title, Kind: m.Kind, Platforms: schedule.Targets(sc, m)})
+	}
+	return info
+}
+
+// Save replaces the schedule's settings. Times already past today do not
+// run on saving.
+func (x *Scheduler) Save(sc store.Schedule) (ScheduleInfo, error) {
+	times, perRun := map[store.Kind][]string{}, map[store.Kind]int{}
+	for _, k := range store.Kinds {
+		name := schedule.KindName(k)
+		ts, err := cleanTimes(sc.Times[k])
+		if err != nil {
+			return ScheduleInfo{}, fmt.Errorf("%s%w", name, err)
+		}
+		if sc.Enabled && len(sc.Platforms[k]) > 0 && len(ts) == 0 {
+			return ScheduleInfo{}, fmt.Errorf("%s勾选了平台，请设置发布时间，或者取消勾选", name)
+		}
+		if n := sc.PerRun[k]; n < 1 || n > 20 {
+			return ScheduleInfo{}, fmt.Errorf("%s每次发布的条数要在 1 到 20 之间", name)
+		}
+		times[k], perRun[k] = ts, sc.PerRun[k]
+	}
+	if sc.Enabled && !slices.ContainsFunc(store.Kinds, func(k store.Kind) bool { return len(sc.Platforms[k]) > 0 }) {
+		return ScheduleInfo{}, errors.New("请至少给视频或文章勾选一个平台")
+	}
+	if sc.Statement != "" && !slices.Contains(statements, sc.Statement) {
+		return ScheduleInfo{}, errors.New("未知的创作声明")
+	}
+	saved, err := x.store.UpdateSchedule(func(s *store.Schedule) {
+		s.Enabled, s.Times, s.PerRun, s.Platforms, s.Statement = sc.Enabled, times, perRun, sc.Platforms, sc.Statement
+		s.Ran = map[store.Kind]time.Time{}
+		for _, k := range store.Kinds {
+			s.Ran[k] = time.Now()
+		}
+	})
+	if err != nil {
+		return ScheduleInfo{}, err
+	}
+	return x.info(saved), nil
+}
+
+// cleanTimes reads times of day as "15:04", sorted and without repeats;
+// "20：00" and "20" are 20:00.
+func cleanTimes(in []string) ([]string, error) {
+	times := []string{}
+	for _, t := range in {
+		t = strings.TrimSpace(strings.ReplaceAll(t, "：", ":"))
+		if t == "" {
+			continue
+		}
+		at, err := time.Parse("15:04", t)
+		if err != nil {
+			if at, err = time.Parse("15", t); err != nil {
+				return nil, fmt.Errorf("的时间「%s」格式不对，请写成 20:00 这样", t)
+			}
+		}
+		if t = at.Format("15:04"); !slices.Contains(times, t) {
+			times = append(times, t)
+		}
+	}
+	slices.Sort(times)
+	return times, nil
+}
+
+// RunNow publishes the next materials right away.
+func (x *Scheduler) RunNow() ScheduleInfo { return x.info(x.sched.Run()) }
+
+// statements are the creation statements Bilibili offers, in its words.
+var statements = []string{"内容无需标注", "含AI生成内容", "含虚构演绎内容"}
+
+// Settings are the app's preferences, with the ones the system keeps.
+type Settings struct {
+	store *store.Store
+	// dataDir holds data.json and the browser profile.
+	dataDir string
+}
+
+// SettingsInfo is the settings with what the system says.
+type SettingsInfo struct {
+	Settings store.Settings `json:"settings"`
+	// OpenAtLogin is whether the app starts when the user logs in.
+	OpenAtLogin bool   `json:"openAtLogin"`
+	DataDir     string `json:"dataDir"`
+	Version     string `json:"version"`
+}
+
+// Get returns the settings.
+func (x *Settings) Get() SettingsInfo {
+	return SettingsInfo{
+		Settings:    x.store.Settings(),
+		OpenAtLogin: mygo.App.OpenAtLogin(),
+		DataDir:     x.dataDir,
+		Version:     mygo.App.Version(),
+	}
+}
+
+// Save replaces the settings and applies them.
+func (x *Settings) Save(st store.Settings, openAtLogin bool) (SettingsInfo, error) {
+	if !slices.Contains([]string{"", "light", "dark"}, st.Theme) {
+		return SettingsInfo{}, fmt.Errorf("未知的外观 %q", st.Theme)
+	}
+	if openAtLogin != mygo.App.OpenAtLogin() {
+		if err := mygo.App.SetOpenAtLogin(openAtLogin); err != nil {
+			return SettingsInfo{}, fmt.Errorf("设置开机自启失败：%w", err)
+		}
+	}
+	st.Collections = cleanCollections(st.Collections)
+	if err := x.store.SetSettings(st); err != nil {
+		return SettingsInfo{}, err
+	}
+	applyTheme(st)
+	return x.Get(), nil
+}
+
+// OpenDataDir opens the data folder in the file manager.
+func (x *Settings) OpenDataDir() error { return mygo.Shell.OpenPath(x.dataDir) }
+
+// applyTheme gives the app the appearance st asks for.
+func applyTheme(st store.Settings) {
+	src := mygo.ThemeSystem
+	if st.Theme != "" {
+		src = mygo.ThemeSource(st.Theme)
+	}
+	mygo.Theme.SetSource(src)
+}

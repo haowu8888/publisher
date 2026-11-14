@@ -1,0 +1,21 @@
+{
+  "manifest_version": 3,
+  "name": "Publisher 登录同步",
+  "version": "0.2.0",
+  "description": "把本浏览器里各发布平台的登录状态同步到 Publisher 桌面应用。",
+  "permissions": ["cookies"],
+  "host_permissions": [
+    "http://127.0.0.1:17891/*",
+    "*://*.bilibili.com/*",
+    "*://*.douyin.com/*",
+    "*://*.weixin.qq.com/*",
+    "*://*.kuaishou.com/*",
+    "*://*.xiaohongshu.com/*"
+  ],
+  "action": {
+    "default_title": "同步登录到 Publisher",
+    "default_popup": "popup.html",
+    "default_icon": { "16": "icon16.png", "48": "icon48.png", "128": "icon128.png" }
+  },
+  "icons": { "16": "icon16.png", "48": "icon48.png", "128": "icon128.png" }
+}

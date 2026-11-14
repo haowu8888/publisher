@@ -1,0 +1,32 @@
+{
+  "materials": [
+    {
+      "id": "a1",
+      "kind": "article",
+      "title": "测试文章标题",
+      "description": "",
+      "tags": [
+        "AI",
+        "教程"
+      ],
+      "articlePath": "D:\\AI\\claude-docker\\workspace\\publisher\\.dev\\测试文章.md",
+      "body": "这是正文第一段。\n\n## 小节\n\n- 列表项\n",
+      "createdAt": "2026-11-10T05:12:30.042113+00:00"
+    },
+    {
+      "id": "v1",
+      "kind": "video",
+      "title": "测试视频",
+      "description": "这是一段自动化上传测试的简介",
+      "tags": [
+        "测试",
+        "自动化"
+      ],
+      "videoPath": "D:\\AI\\claude-docker\\workspace\\publisher\\.dev\\测试视频.mp4",
+      "coverPath": "D:\\AI\\claude-docker\\workspace\\publisher\\.dev\\测试视频.jpg",
+      "createdAt": "2026-11-10T05:12:30.042113+00:00"
+    }
+  ],
+  "tasks": [],
+  "accounts": {}
+}

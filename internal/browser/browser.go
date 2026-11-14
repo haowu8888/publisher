@@ -1,0 +1,149 @@
+// Package browser drives a visible Chrome (or Edge) with its own profile, so
+// that logins to the platforms persist between runs and the user can scan
+// QR codes and watch the uploads.
+package browser
+
+import (
+	"errors"
+	"net"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/go-rod/rod"
+	"github.com/go-rod/rod/lib/launcher"
+	"github.com/go-rod/rod/lib/proto"
+)
+
+// Browser launches Chrome on first use and again after the user closes it.
+type Browser struct {
+	profileDir string
+
+	mu sync.Mutex
+	b  *rod.Browser
+	l  *launcher.Launcher
+}
+
+// New returns a Browser that keeps its profile in profileDir.
+func New(profileDir string) *Browser {
+	return &Browser{profileDir: profileDir}
+}
+
+// Get returns the running browser, launching it if needed.
+func (x *Browser) Get() (*rod.Browser, error) {
+	x.mu.Lock()
+	defer x.mu.Unlock()
+	if x.b != nil {
+		if _, err := x.b.Version(); err == nil {
+			return x.b, nil
+		}
+		x.closeLocked()
+	}
+	// A Chrome left running by an app that crashed still holds the profile,
+	// so a second one could not start with it: take that one over.
+	if b := x.reconnect(); b != nil {
+		x.b = b
+		return b, nil
+	}
+	bin, ok := launcher.LookPath()
+	if !ok {
+		return nil, errors.New("未找到 Chrome 或 Edge，请先安装 Chrome")
+	}
+	l := launcher.New().
+		Bin(bin).
+		UserDataDir(x.profileDir).
+		Headless(false).
+		Leakless(false).
+		Delete("enable-automation").
+		Delete("no-startup-window").
+		Set("disable-blink-features", "AutomationControlled").
+		Set("start-maximized")
+	u, err := l.Launch()
+	if err != nil {
+		return nil, err
+	}
+	b := rod.New().ControlURL(u).NoDefaultDevice()
+	if err := b.Connect(); err != nil {
+		l.Kill()
+		return nil, err
+	}
+	x.b, x.l = b, l
+	return b, nil
+}
+
+// reconnect connects to a Chrome already running with the profile, which
+// writes its debugging address to DevToolsActivePort.
+func (x *Browser) reconnect() *rod.Browser {
+	data, err := os.ReadFile(filepath.Join(x.profileDir, "DevToolsActivePort"))
+	if err != nil {
+		return nil
+	}
+	port, path, ok := strings.Cut(strings.TrimSpace(string(data)), "\n")
+	if !ok {
+		return nil
+	}
+	// The file outlives the Chrome that wrote it.
+	addr := "127.0.0.1:" + strings.TrimSpace(port)
+	conn, err := net.DialTimeout("tcp", addr, time.Second)
+	if err != nil {
+		return nil
+	}
+	conn.Close()
+	b := rod.New().ControlURL("ws://" + addr + strings.TrimSpace(path)).NoDefaultDevice()
+	if b.Connect() != nil {
+		return nil
+	}
+	return b
+}
+
+// Page opens url in a new tab.
+func (x *Browser) Page(url string) (*rod.Page, error) {
+	b, err := x.Get()
+	if err != nil {
+		return nil, err
+	}
+	return b.Page(proto.TargetCreateTarget{URL: url})
+}
+
+// Cookies returns the cookies of all sites, or nil when the browser is not
+// running: checking logins should not open a window.
+func (x *Browser) Cookies() ([]*proto.NetworkCookie, error) {
+	x.mu.Lock()
+	b := x.b
+	x.mu.Unlock()
+	if b == nil {
+		return nil, nil
+	}
+	return b.GetCookies()
+}
+
+// Running reports whether the browser was launched and is still open.
+func (x *Browser) Running() bool {
+	x.mu.Lock()
+	defer x.mu.Unlock()
+	if x.b == nil {
+		return false
+	}
+	_, err := x.b.Version()
+	return err == nil
+}
+
+// Close quits the browser.
+func (x *Browser) Close() {
+	x.mu.Lock()
+	defer x.mu.Unlock()
+	x.closeLocked()
+}
+
+func (x *Browser) closeLocked() {
+	if x.b != nil {
+		x.b.Close()
+		x.b = nil
+	}
+	if x.l != nil {
+		x.l.Kill()
+		x.l = nil
+	}
+}

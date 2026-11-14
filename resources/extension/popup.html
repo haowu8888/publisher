@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <style>
+      :root {
+        color-scheme: light dark;
+        --bg: light-dark(#ffffff, #1a1d24);
+        --line: light-dark(#e3e6eb, #2c313b);
+        --muted: light-dark(#6b7280, #8b93a1);
+        --accent: #fb7299;
+        --ok: light-dark(#16a34a, #4ade80);
+        --warn: light-dark(#d97706, #fbbf24);
+        --bad: light-dark(#dc2626, #f87171);
+        font: 13px/1.5 system-ui, "Segoe UI", "Microsoft YaHei", sans-serif;
+      }
+      body { margin: 0; width: 300px; padding: 14px; background: var(--bg); }
+      h1 { font-size: 15px; margin: 0 0 4px; }
+      p { margin: 0 0 12px; color: var(--muted); }
+      button {
+        width: 100%; padding: 8px; border: none; border-radius: 8px; cursor: pointer;
+        background: var(--accent); color: #fff; font: inherit; font-weight: 600;
+      }
+      button:disabled { opacity: 0.6; cursor: default; }
+      #status { margin-top: 12px; }
+      #status:empty { display: none; }
+      .err { color: var(--bad); }
+      ul { list-style: none; margin: 8px 0 0; padding: 0; border-top: 1px solid var(--line); }
+      li { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid var(--line); }
+      .loggedIn { color: var(--ok); }
+      .loggedOut { color: var(--bad); }
+      .checking { color: var(--warn); }
+    </style>
+  </head>
+  <body>
+    <h1>同步登录到 Publisher</h1>
+    <p>把本浏览器里 B站、抖音、快手、小红书、公众号的登录状态复制给 Publisher 应用。请先打开 Publisher。</p>
+    <button id="sync">同步</button>
+    <div id="status"></div>
+    <script src="popup.js"></script>
+  </body>
+</html>
