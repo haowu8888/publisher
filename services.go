@@ -4,8 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -786,16 +789,29 @@ type SettingsInfo struct {
 	OpenAtLogin bool   `json:"openAtLogin"`
 	DataDir     string `json:"dataDir"`
 	Version     string `json:"version"`
+	// BackgroundURL is where the page loads the background image from.
+	BackgroundURL string `json:"backgroundURL,omitempty"`
 }
 
 // Get returns the settings.
 func (x *Settings) Get() SettingsInfo {
-	return SettingsInfo{
-		Settings:    x.store.Settings(),
+	st := x.store.Settings()
+	info := SettingsInfo{
+		Settings:    st,
 		OpenAtLogin: mygo.App.OpenAtLogin(),
 		DataDir:     x.dataDir,
 		Version:     mygo.App.Version(),
 	}
+	if st.UI.Background != "" {
+		// The bg scheme (main), which WebView2 serves as
+		// http://bg.localhost.
+		base := "bg://localhost/"
+		if runtime.GOOS == "windows" {
+			base = "http://bg.localhost/"
+		}
+		info.BackgroundURL = base + url.PathEscape(st.UI.Background)
+	}
+	return info
 }
 
 // Save replaces the settings and applies them.
@@ -809,15 +825,110 @@ func (x *Settings) Save(st store.Settings, openAtLogin bool) (SettingsInfo, erro
 		}
 	}
 	st.Collections = cleanCollections(st.Collections)
+	ui, err := cleanUI(st.UI)
+	if err != nil {
+		return SettingsInfo{}, err
+	}
+	// The background changes only through PickBackground, which copies
+	// the file into the app's folder.
+	ui.Background = x.store.Settings().UI.Background
+	st.UI = ui
 	if err := x.store.SetSettings(st); err != nil {
 		return SettingsInfo{}, err
 	}
 	applyTheme(st)
+	applyZoom(st)
+	return x.Get(), nil
+}
+
+// accentColor is a color the page can take as its accent.
+var accentColor = regexp.MustCompile(`^#[0-9a-fA-F]{6}$`)
+
+// cleanUI checks the look's choices and keeps the numbers in range.
+func cleanUI(ui store.UI) (store.UI, error) {
+	if ui.Accent != "" && !accentColor.MatchString(ui.Accent) {
+		return ui, fmt.Errorf("主题色 %q 不是 #rrggbb", ui.Accent)
+	}
+	if !slices.Contains([]string{"", "glass", "soft"}, ui.Style) {
+		return ui, fmt.Errorf("未知的风格 %q", ui.Style)
+	}
+	if !slices.Contains([]string{"", "small", "large"}, ui.Corner) {
+		return ui, fmt.Errorf("未知的圆角 %q", ui.Corner)
+	}
+	if ui.Zoom != 0 {
+		ui.Zoom = min(max(ui.Zoom, 80), 130)
+	}
+	ui.Veil = min(max(ui.Veil, 0), 95)
+	ui.Panel = min(max(ui.Panel, 0), 90)
+	ui.Blur = min(max(ui.Blur, 0), 30)
+	return ui, nil
+}
+
+// backgroundsDir holds the background images, served to the page by the
+// bg scheme (main).
+func (x *Settings) backgroundsDir() string { return filepath.Join(x.dataDir, "backgrounds") }
+
+// PickBackground asks for an image and makes it the background. It keeps
+// a copy, so the image may move or go away afterwards; each copy has a new
+// name, so the page loads it afresh.
+func (x *Settings) PickBackground(ctx context.Context) (SettingsInfo, error) {
+	paths, err := mygo.Dialog.Open(mygo.OpenDialogOptions{
+		Parent:  mygo.CallerWindow(ctx),
+		Title:   "选择背景图片",
+		Filters: []mygo.FileFilter{{Name: "图片", Extensions: append(slices.Clone(imageExts), "gif", "bmp")}},
+	})
+	if err != nil || len(paths) == 0 {
+		return x.Get(), err
+	}
+	b, err := os.ReadFile(paths[0])
+	if err != nil {
+		return x.Get(), err
+	}
+	dir := x.backgroundsDir()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return x.Get(), err
+	}
+	name := strconv.FormatInt(time.Now().UnixMilli(), 36) + strings.ToLower(filepath.Ext(paths[0]))
+	if err := os.WriteFile(filepath.Join(dir, name), b, 0o644); err != nil {
+		return x.Get(), err
+	}
+	return x.setBackground(name)
+}
+
+// ClearBackground goes back to the plain page color.
+func (x *Settings) ClearBackground() (SettingsInfo, error) { return x.setBackground("") }
+
+func (x *Settings) setBackground(name string) (SettingsInfo, error) {
+	st := x.store.Settings()
+	if st.UI.Background == "" && name != "" && st.UI.Veil == 0 {
+		// Text stays readable on a busy picture.
+		st.UI.Veil = 40
+	}
+	old := st.UI.Background
+	st.UI.Background = name
+	if err := x.store.SetSettings(st); err != nil {
+		return x.Get(), err
+	}
+	if old != "" && old != name {
+		os.Remove(filepath.Join(x.backgroundsDir(), old))
+	}
 	return x.Get(), nil
 }
 
 // OpenDataDir opens the data folder in the file manager.
 func (x *Settings) OpenDataDir() error { return mygo.Shell.OpenPath(x.dataDir) }
+
+// applyZoom scales the windows' pages as st asks. The web view zooms
+// them, so the layout fits the window at any scale.
+func applyZoom(st store.Settings) {
+	z := 1.0
+	if st.UI.Zoom != 0 {
+		z = float64(st.UI.Zoom) / 100
+	}
+	for _, w := range mygo.Windows() {
+		w.Page().SetZoomFactor(z)
+	}
+}
 
 // applyTheme gives the app the appearance st asks for.
 func applyTheme(st store.Settings) {

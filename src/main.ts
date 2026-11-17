@@ -868,9 +868,47 @@ events.scheduleRan.on(async (sc) => {
 
 // ---- Settings ----
 
-// applyTheme makes the page follow the chosen appearance even where the
-// system's override does not reach the web view.
-const applyTheme = (theme = "") => (document.documentElement.style.colorScheme = theme);
+const accents: [string, string][] = [
+  ["", "樱粉"],
+  ["#3b82f6", "天蓝"],
+  ["#10b981", "青绿"],
+  ["#8b5cf6", "紫罗兰"],
+  ["#f97316", "橙色"],
+  ["#475569", "石墨"],
+];
+
+// inkOn is the text color that reads on the color hex: dark on light ones.
+function inkOn(hex: string) {
+  const lin = (i: number) => {
+    const c = parseInt(hex.slice(i, i + 2), 16) / 255;
+    return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+  };
+  return 0.2126 * lin(1) + 0.7152 * lin(3) + 0.0722 * lin(5) > 0.45 ? "#111318" : "#ffffff";
+}
+
+// applyLook gives the page the chosen appearance: light or dark (also
+// where the system's override does not reach the web view), the accent,
+// the style, the corners and the background. The zoom is the web view's
+// (Settings.Save).
+function applyLook(info: SettingsInfo) {
+  const root = document.documentElement;
+  const st = info.settings;
+  const ui = st.ui ?? {};
+  root.style.colorScheme = st.theme ?? "";
+  const set = (name: string, value?: string) => (value ? root.style.setProperty(name, value) : root.style.removeProperty(name));
+  set("--accent", ui.accent);
+  set("--accent-ink", ui.accent && inkOn(ui.accent));
+  set("--bg-image", info.backgroundURL && `url("${info.backgroundURL}")`);
+  // The panels' transparency counts only over a background image.
+  const panel = info.backgroundURL ? (ui.panel ?? 0) : 0;
+  set("--panel-a", panel ? `${100 - panel}%` : undefined);
+  for (const [k, v] of Object.entries({ style: ui.style, corner: ui.corner, bg: ui.background, clear: panel ? "on" : "" })) {
+    if (v) root.dataset[k] = v;
+    else delete root.dataset[k];
+  }
+  root.style.setProperty("--veil", String((ui.veil ?? 0) / 100));
+  root.style.setProperty("--blur", `${ui.blur ?? 0}px`);
+}
 
 function renderSettings() {
   const info = state.settings;
@@ -881,12 +919,36 @@ function renderSettings() {
     ["light", "浅色"],
     ["dark", "深色"],
   ];
+  const ui = st.ui ?? {};
+  const accent = ui.accent ?? "";
+  const custom = accent !== "" && !accents.some(([c]) => c === accent);
+  const styles: [string, string][] = [
+    ["", "标准"],
+    ["glass", "毛玻璃"],
+    ["soft", "柔和"],
+  ];
+  const corners: [string, string][] = [
+    ["small", "小"],
+    ["", "中"],
+    ["large", "大"],
+  ];
+  const zooms: [string, string][] = ["90", "100", "110", "120"].map((z) => [z, `${z}%`]);
+  const segmented = (key: string, options: [string, string][], current: string) =>
+    `<div class="segmented">${options
+      .map(([v, label]) => `<button data-${key}="${v}" class="${current === v ? "active" : ""}">${label}</button>`)
+      .join("")}</div>`;
+  const range = (key: string, title: string, note: string, value: number, lo: number, hi: number, unit: string) => `<div class="setting">
+      <span class="label"><strong>${title}</strong><small>${note}</small></span>
+      <span class="range"><input type="range" data-ui="${key}" min="${lo}" max="${hi}" value="${value}" /><output>${value}${unit}</output></span></div>`;
+  // Every change draws the page again, which would scroll it back to the
+  // top, away from the slider being moved; it keeps its place instead.
+  const top = document.querySelector<HTMLElement>(".settings-body")?.scrollTop ?? 0;
   const check = (id: string, on: boolean, title: string, note: string) => `<label class="setting">
       <span class="label"><strong>${title}</strong><small>${note}</small></span>
       <input type="checkbox" data-setting="${id}" ${on ? "checked" : ""} /></label>`;
   view.innerHTML = `
     <div class="view-head"><h2>设置</h2></div>
-    <div class="view-body">
+    <div class="view-body settings-body">
       <div class="section">
         <h3>常规</h3>
         ${check("openAtLogin", info.openAtLogin, "开机自启", "登录 Windows 后自动启动，并直接隐藏到托盘，定时发布照常进行")}
@@ -896,9 +958,41 @@ function renderSettings() {
         <h3>外观</h3>
         <div class="setting">
           <span class="label"><strong>主题</strong><small>白天/夜晚模式，跟随系统时随 Windows 的深浅色设置切换</small></span>
-          <div class="segmented">${themes
-            .map(([v, label]) => `<button data-theme="${v}" class="${(st.theme ?? "") === v ? "active" : ""}">${label}</button>`)
-            .join("")}</div>
+          ${segmented("theme", themes, st.theme ?? "")}
+        </div>
+        <div class="setting">
+          <span class="label"><strong>主题色</strong><small>按钮、选中项和标记的颜色；最后一个可以自己调</small></span>
+          <div class="swatches">${accents
+            .map(([c, name]) => `<button class="swatch ${accent === c ? "active" : ""}" style="--c:${c || "#fb7299"}" data-accent="${c}" title="${name}"></button>`)
+            .join("")}<label class="swatch swatch-custom ${custom ? "active" : ""}" style="--c:${custom ? accent : "transparent"}" title="自定义颜色"><input type="color" data-ui="accent" value="${accent || "#fb7299"}" /></label></div>
+        </div>
+        <div class="setting">
+          <span class="label"><strong>风格</strong><small>毛玻璃：面板半透明，配背景图片效果最好；柔和：用阴影代替边框</small></span>
+          ${segmented("style", styles, ui.style ?? "")}
+        </div>
+        <div class="setting">
+          <span class="label"><strong>圆角</strong><small>按钮、卡片和输入框的圆角大小</small></span>
+          ${segmented("corner", corners, ui.corner ?? "")}
+        </div>
+        <div class="setting">
+          <span class="label"><strong>界面缩放</strong><small>文字和控件整体放大或缩小</small></span>
+          ${segmented("zoom", zooms, String(ui.zoom || 100))}
+        </div>
+        <div class="setting">
+          <span class="label"><strong>背景图片</strong><small>${ui.background ? "图片已复制到数据目录，原文件移走也不影响" : "选一张图片铺满窗口背景"}</small></span>
+          <span class="row-buttons">${ui.background ? `<span class="bg-preview" style="background-image:url('${esc(info.backgroundURL ?? "")}')"></span>` : ""}
+            <button data-act="pick-bg">${ui.background ? "更换" : "选择图片"}</button>${ui.background ? `<button class="ghost" data-act="clear-bg">移除</button>` : ""}</span>
+        </div>
+        ${
+          ui.background
+            ? `${range("veil", "图片透明度", "越高图片越淡，文字越清楚", ui.veil ?? 0, 0, 95, "%")}
+               ${range("panel", "面板透明度", "卡片、侧栏等面板透出背景的程度；太高时文字可能看不清", ui.panel ?? 0, 0, 90, "%")}
+               ${range("blur", "模糊", "把图片虚化，减少干扰", ui.blur ?? 0, 0, 30, "px")}`
+            : ""
+        }
+        <div class="setting">
+          <span class="label"><strong>恢复默认外观</strong><small>主题色、风格、圆角、缩放和背景都回到默认，深浅色不变</small></span>
+          <button data-act="reset-look">恢复默认</button>
         </div>
       </div>
       <div class="section">
@@ -929,6 +1023,7 @@ function renderSettings() {
         <div class="muted"><small>素材、任务、设置都在 data.json 里；chrome-profile 是自动化浏览器的登录信息。</small></div>
       </div>
     </div>`;
+  view.querySelector(".settings-body")!.scrollTop = top;
 }
 
 const mb = (n: number) => `${(n / 1048576).toFixed(1)} MB`;
@@ -967,13 +1062,31 @@ async function saveSettings(change: (s: SettingsInfo) => void) {
   const info = await attempt(() => Settings.save(next.settings, next.openAtLogin));
   if (info) {
     state.settings = info;
-    applyTheme(info.settings.theme);
+    applyLook(info);
   }
   render();
 }
 
+// The sliders and the color picker show their effect while they move,
+// and save once let go.
+view.addEventListener("input", (e) => {
+  const el = e.target as HTMLInputElement;
+  const key = el.dataset.ui;
+  if (!key || !state.settings) return;
+  const info = structuredClone(state.settings);
+  info.settings.ui = { ...info.settings.ui, [key]: key === "accent" ? el.value : Number(el.value) };
+  applyLook(info);
+  const out = el.nextElementSibling;
+  if (out?.tagName === "OUTPUT") out.textContent = `${el.value}${key === "blur" ? "px" : "%"}`;
+});
+
+const saveUI = (change: Partial<NonNullable<SettingsInfo["settings"]["ui"]>>) =>
+  saveSettings((s) => (s.settings.ui = { ...s.settings.ui, ...change }));
+
 view.addEventListener("change", (e) => {
   const cb = e.target as HTMLInputElement;
+  const key = cb.dataset.ui;
+  if (key) return void saveUI({ [key]: key === "accent" ? cb.value : Number(cb.value) });
   const platform = cb.dataset.collection;
   if (platform) {
     return void saveSettings((s) => (s.settings.collections = { ...s.settings.collections, [platform]: cb.value.trim() }));
@@ -1007,6 +1120,10 @@ view.addEventListener("click", async (e) => {
     return render();
   }
   if (d.theme !== undefined) return saveSettings((s) => (s.settings.theme = d.theme));
+  if (d.accent !== undefined) return saveUI({ accent: d.accent });
+  if (d.style !== undefined) return saveUI({ style: d.style });
+  if (d.corner !== undefined) return saveUI({ corner: d.corner });
+  if (d.zoom !== undefined) return saveUI({ zoom: d.zoom === "100" ? 0 : Number(d.zoom) });
   if (d.login) return login(d.login);
   if (d.check) {
     const a = await check(d.check);
@@ -1139,6 +1256,20 @@ view.addEventListener("click", async (e) => {
       return toast("已复制，粘贴到 Chrome 地址栏打开");
     case "open-data-dir":
       return void attempt(() => Settings.openDataDir());
+    case "pick-bg":
+    case "clear-bg": {
+      const info = await attempt(() => (d.act === "pick-bg" ? Settings.pickBackground() : Settings.clearBackground()));
+      if (info) {
+        state.settings = info;
+        applyLook(info);
+        render();
+      }
+      return;
+    }
+    case "reset-look":
+      if (!confirm("把主题色、风格、圆角、缩放和背景图片都恢复默认？")) return;
+      await attempt(() => Settings.clearBackground());
+      return saveSettings((s) => (s.settings.ui = {}));
     case "check-update":
       return void Updates.check().catch(() => {}); // the row shows the error
     case "install-update": {
@@ -1180,5 +1311,5 @@ view.addEventListener("click", async (e) => {
   Settings.get(),
 ]);
 state.update = await Updates.state();
-applyTheme(state.settings.settings.theme);
+applyLook(state.settings);
 setView("library");

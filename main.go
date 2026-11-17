@@ -2,6 +2,7 @@ package main
 
 import (
 	"log"
+	"os"
 	"path/filepath"
 
 	"publisher/internal/browser"
@@ -45,7 +46,13 @@ func main() {
 	mygo.Bind(library)
 	mygo.Bind(accounts)
 	mygo.Bind(&Publisher{store: s, queue: q})
-	mygo.Bind(&Settings{store: s, dataDir: dir})
+	settings := &Settings{store: s, dataDir: dir}
+	mygo.Bind(settings)
+	// The page shows the background image as bg://localhost/<name>, which
+	// WebView2 serves as http://bg.localhost/<name>.
+	if err := mygo.Protocol.Handle("bg", mygo.FileServer(os.DirFS(settings.backgroundsDir()))); err != nil {
+		log.Println("bg:", err)
+	}
 	updates := &Updates{store: s}
 	mygo.Bind(updates)
 	go updates.watch()
@@ -75,6 +82,7 @@ func main() {
 			// Started with the system, the app waits in the tray.
 			Hidden: mygo.App.WasOpenedAtLogin(),
 		})
+		applyZoom(s.Settings())
 		show := func() {
 			win.Show()
 			if win.IsMinimized() {

@@ -104,6 +104,7 @@ export interface Settings {
   original?: boolean;
   autoSync?: boolean;
   noUpdateCheck?: boolean;
+  ui: UI;
 }
 
 /** SettingsInfo is the settings with what the system says. */
@@ -113,6 +114,8 @@ export interface SettingsInfo {
   openAtLogin: boolean;
   dataDir: string;
   version: string;
+  /** BackgroundURL is where the page loads the background image from. */
+  backgroundURL?: string;
 }
 
 export type Status = string;
@@ -154,6 +157,17 @@ export interface Task {
   error?: string;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface UI {
+  accent?: string;
+  style?: string;
+  corner?: string;
+  zoom?: number;
+  background?: string;
+  veil?: number;
+  panel?: number;
+  blur?: number;
 }
 
 /** UpdateState is what the settings page shows of updates. */
@@ -353,6 +367,10 @@ export const Publisher = {
 
 /** Settings are the app's preferences, with the ones the system keeps. */
 export const Settings = {
+  /** ClearBackground goes back to the plain page color. */
+  clearBackground(): Promise<SettingsInfo> {
+    return call("Settings.ClearBackground");
+  },
   /** Get returns the settings. */
   get(): Promise<SettingsInfo> {
     return call("Settings.Get");
@@ -360,6 +378,14 @@ export const Settings = {
   /** OpenDataDir opens the data folder in the file manager. */
   openDataDir(): Promise<void> {
     return call("Settings.OpenDataDir");
+  },
+  /**
+   * PickBackground asks for an image and makes it the background. It keeps
+   * a copy, so the image may move or go away afterwards; each copy has a new
+   * name, so the page loads it afresh.
+   */
+  pickBackground(): Promise<SettingsInfo> {
+    return call("Settings.PickBackground");
   },
   /** Save replaces the settings and applies them. */
   save(st: Settings, openAtLogin: boolean): Promise<SettingsInfo> {

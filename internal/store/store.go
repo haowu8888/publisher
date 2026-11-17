@@ -159,6 +159,32 @@ type Settings struct {
 	AutoSync bool `json:"autoSync,omitempty"`
 	// NoUpdateCheck stops the app looking for a newer build by itself.
 	NoUpdateCheck bool `json:"noUpdateCheck,omitempty"`
+	// UI is the look: colors, style, background.
+	UI UI `json:"ui"`
+}
+
+// UI is the look of the app beyond light and dark; zero values are the
+// defaults.
+type UI struct {
+	// Accent is the main color as #rrggbb, or empty for the pink.
+	Accent string `json:"accent,omitempty"`
+	// Style is "" for the standard one, "glass" for see-through panels
+	// or "soft" for shadows in place of borders.
+	Style string `json:"style,omitempty"`
+	// Corner is "", "small" or "large".
+	Corner string `json:"corner,omitempty"`
+	// Zoom scales the page, in percent; 0 is 100.
+	Zoom int `json:"zoom,omitempty"`
+	// Background is the background image, a file in the backgrounds
+	// folder beside data.json.
+	Background string `json:"background,omitempty"`
+	// Veil is how much the page color covers the background image: its
+	// transparency, 0–95 %.
+	Veil int `json:"veil,omitempty"`
+	// Panel is the panels' transparency over the background, 0–90 %.
+	Panel int `json:"panel,omitempty"`
+	// Blur blurs the background, in pixels.
+	Blur int `json:"blur,omitempty"`
 }
 
 // NoCollection, as a material's collection, keeps it out of the default
