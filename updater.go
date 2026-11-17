@@ -46,7 +46,12 @@ type UpdateState struct {
 	Newer   bool   `json:"newer"`
 	// Portable is a copy run from the zip, which an update replaces in its
 	// folder; an installed copy runs the new installer.
-	Portable  bool   `json:"portable"`
+	Portable bool `json:"portable"`
+	// Local is a copy built on this computer: its version keeps the
+	// x.y.0 of mygo.config.ts, which Flow never gives (0.1.<run>), so
+	// every build on the drive looks newer though it may hold older code.
+	// It is not checked by itself.
+	Local     bool   `json:"local"`
 	File      string `json:"file,omitempty"`
 	Size      int64  `json:"size,omitempty"`
 	Published int64  `json:"published,omitempty"` // Unix milliseconds
@@ -83,8 +88,12 @@ func (u *Updates) State() UpdateState {
 	defer u.mu.Unlock()
 	u.state.Current = mygo.App.Version()
 	u.state.Portable = portable()
+	u.state.Local = localBuild(u.state.Current)
 	return u.state
 }
+
+// localBuild tells a version of a build made on this computer.
+func localBuild(v string) bool { return v == "" || strings.HasSuffix(v, ".0") }
 
 // Check looks for a newer build in the share.
 func (u *Updates) Check() (UpdateState, error) {
@@ -104,6 +113,7 @@ func (u *Updates) Check() (UpdateState, error) {
 	s.Checking = false
 	s.Current = mygo.App.Version()
 	s.Portable = portable()
+	s.Local = localBuild(s.Current)
 	s.Checked = time.Now().UnixMilli()
 	s.Error = ""
 	if err != nil {
@@ -248,11 +258,11 @@ func (u *Updates) download(link, file string, size int64) error {
 }
 
 // watch checks a minute after the start and then every six hours, unless
-// the settings turned it off.
+// the settings turned it off or the app was built here.
 func (u *Updates) watch() {
 	time.Sleep(time.Minute)
 	for {
-		if !u.store.Settings().NoUpdateCheck {
+		if !u.store.Settings().NoUpdateCheck && !localBuild(mygo.App.Version()) {
 			if _, err := u.Check(); err != nil {
 				log.Println("update:", err)
 			}

@@ -40,15 +40,20 @@ button {
   border-radius: var(--radius-sm);
   padding: 6px 12px;
   cursor: pointer;
+  transition: background-color 0.15s, border-color 0.15s, color 0.15s, box-shadow 0.15s, filter 0.15s;
 }
 button:hover:not(:disabled) { border-color: var(--accent); }
+button:active:not(:disabled) { transform: translateY(1px); }
+button:focus-visible { outline: 2px solid color-mix(in srgb, var(--accent) 60%, transparent); outline-offset: 2px; }
 button:disabled { opacity: 0.5; cursor: default; }
 button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 600; }
-button.primary:hover:not(:disabled) { filter: brightness(1.05); }
+button.primary:hover:not(:disabled) { filter: brightness(1.08); box-shadow: 0 2px 10px color-mix(in srgb, var(--accent) 35%, transparent); }
 button.ghost { border-color: transparent; background: transparent; color: var(--muted); }
 button.ghost:hover:not(:disabled) { color: var(--text); }
 button.danger { color: var(--bad); }
 button.danger:hover:not(:disabled) { border-color: var(--bad); }
+button.danger-fill { background: var(--bad); border-color: var(--bad); color: #fff; font-weight: 600; }
+button.danger-fill:hover:not(:disabled) { filter: brightness(1.08); box-shadow: 0 2px 10px color-mix(in srgb, var(--bad) 35%, transparent); }
 
 input[type="text"], textarea, select {
   width: 100%;
@@ -58,7 +63,19 @@ input[type="text"], textarea, select {
   padding: 8px 10px;
   outline: none;
 }
-input[type="text"]:focus, textarea:focus { border-color: var(--accent); }
+input[type="text"], textarea, select, input.num { transition: border-color 0.15s, box-shadow 0.15s; }
+input[type="text"]:focus, textarea:focus, select:focus, input.num:focus {
+  border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent); outline: none;
+}
+select {
+  appearance: none; cursor: pointer; padding-right: 30px;
+  background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%), linear-gradient(135deg, var(--muted) 50%, transparent 50%);
+  background-position: right 15px center, right 10px center; background-size: 5px 5px; background-repeat: no-repeat;
+}
+select option { background: light-dark(#ffffff, #1a1d24); }
+
+/* Thin scrollbars in the theme's colors. */
+* { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--muted) 45%, transparent) transparent; }
 textarea { resize: vertical; min-height: 90px; line-height: 1.5; }
 
 .muted { color: var(--muted); }
@@ -87,7 +104,11 @@ small { font-size: 12px; }
   display: flex; align-items: center; justify-content: space-between;
 }
 .nav-item:hover { background: var(--panel-2); }
-.nav-item.active { background: var(--panel-2); color: var(--accent); font-weight: 600; }
+.nav-item { position: relative; transition: background-color 0.15s, color 0.15s; }
+.nav-item.active { background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--accent); font-weight: 600; }
+.nav-item.active::before {
+  content: ""; position: absolute; left: 0; top: 9px; bottom: 9px; width: 3px; border-radius: 2px; background: var(--accent);
+}
 .nav-foot { margin-top: auto; padding: 8px; font-size: 12px; }
 .badge {
   min-width: 18px; padding: 0 6px; border-radius: 9px; font-size: 12px; line-height: 18px;
@@ -208,11 +229,39 @@ td.actions { white-space: nowrap; text-align: right; }
 .empty strong { color: var(--text); font-size: 15px; }
 
 .toast {
-  position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
-  background: var(--text); color: var(--bg); padding: 10px 16px; border-radius: var(--radius-sm); max-width: 70vw;
-  box-shadow: 0 6px 24px rgb(0 0 0 / 0.2);
+  position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); z-index: 10;
+  display: flex; align-items: center; gap: 10px; max-width: min(560px, 70vw);
+  background: light-dark(#ffffff, #23272f); color: var(--text); border: 1px solid var(--line);
+  padding: 10px 16px 10px 14px; border-radius: var(--radius); line-height: 1.5;
+  box-shadow: 0 10px 30px rgb(0 0 0 / 0.18), 0 2px 6px rgb(0 0 0 / 0.08);
+  animation: toast-in 0.22s ease-out;
 }
-.toast.error { background: var(--bad); color: #fff; }
+.toast[hidden] { display: none; }
+.toast::before { content: ""; flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--ok); }
+.toast.error::before { background: var(--bad); }
+.toast.error { border-color: color-mix(in srgb, var(--bad) 45%, var(--line)); }
+@keyframes toast-in { from { opacity: 0; transform: translate(-50%, 8px); } }
+
+/* The app's confirm dialog (ask in main.ts). */
+.ask {
+  width: min(440px, calc(100vw - 48px)); padding: 0; border: 1px solid var(--line); border-radius: calc(var(--radius) + 4px);
+  background: light-dark(#ffffff, #1f232b); color: var(--text);
+  box-shadow: 0 24px 60px rgb(0 0 0 / 0.3), 0 4px 12px rgb(0 0 0 / 0.1);
+}
+.ask[open] { animation: ask-in 0.18s ease-out; }
+.ask::backdrop { background: rgb(10 12 16 / 0.42); backdrop-filter: blur(3px); animation: fade-in 0.18s ease-out; }
+.ask form { display: flex; flex-direction: column; gap: 12px; padding: 22px 22px 18px; }
+.ask h3 { margin: 0; font-size: 16px; }
+.ask p { margin: 0; line-height: 1.65; color: var(--muted); white-space: pre-wrap; word-break: break-word; }
+.ask h3 + p { margin-top: -4px; }
+.ask-detail {
+  margin: 0; padding: 8px 12px 8px 28px; max-height: 180px; overflow: auto; line-height: 1.7; font-size: 13px;
+  background: var(--panel-2); border-radius: var(--radius-sm);
+}
+.ask-buttons { display: flex; justify-content: flex-end; gap: 8px; margin-top: 6px; }
+.ask-buttons button { min-width: 76px; padding: 7px 16px; }
+@keyframes ask-in { from { opacity: 0; transform: translateY(8px) scale(0.97); } }
+@keyframes fade-in { from { opacity: 0; } }
 
 /* Schedule */
 .switch { display: flex; gap: 8px; align-items: center; font-weight: 600; cursor: pointer; }
@@ -222,6 +271,8 @@ input.num { width: 72px; border: 1px solid var(--line); background: var(--panel)
 .pending { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 6px; }
 .pending li { display: flex; align-items: center; gap: 10px; padding: 6px 0; border-bottom: 1px solid var(--line); }
 .pending li:last-child { border-bottom: none; }
+/* The schedule's list scrolls by itself past a dozen or so materials. */
+.pending.scroll { max-height: 440px; overflow-y: auto; padding-right: 6px; margin-right: -6px; }
 .pending .kind { width: 30px; height: 26px; }
 .pending .t { flex: 1; min-width: 0; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
@@ -231,7 +282,20 @@ input.num { width: 72px; border: 1px solid var(--line); background: var(--panel)
 .setting .label { display: flex; flex-direction: column; gap: 2px; }
 .setting .label strong { font-weight: 600; }
 .setting .label small { color: var(--muted); }
-.setting input[type="checkbox"] { width: 18px; height: 18px; accent-color: var(--accent); cursor: pointer; flex: none; }
+.setting input[type="checkbox"] {
+  appearance: none; flex: none; cursor: pointer; position: relative; margin: 0;
+  width: 38px; height: 22px; border-radius: 11px; background: color-mix(in srgb, var(--muted) 40%, transparent);
+  transition: background-color 0.18s;
+}
+.setting input[type="checkbox"]::after {
+  content: ""; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%;
+  background: #fff; box-shadow: 0 1px 3px rgb(0 0 0 / 0.25); transition: transform 0.18s;
+}
+.setting input[type="checkbox"]:checked { background: var(--accent); }
+.setting input[type="checkbox"]:checked::after { transform: translateX(16px); }
+.setting input[type="checkbox"]:focus-visible { outline: 2px solid color-mix(in srgb, var(--accent) 60%, transparent); outline-offset: 2px; }
+.setting { cursor: default; }
+label.setting { cursor: pointer; }
 .setting input.setting-text { width: 220px; flex: none; }
 .setting .row-buttons { display: flex; gap: 8px; flex: none; }
 .setting .err { color: var(--bad); }

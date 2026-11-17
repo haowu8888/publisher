@@ -27,6 +27,14 @@ func TestCompareVersions(t *testing.T) {
 	}
 }
 
+func TestLocalBuild(t *testing.T) {
+	for v, want := range map[string]bool{"0.1.0": true, "": true, "0.1.8": false, "0.1.10": false, "1.0": true} {
+		if got := localBuild(v); got != want {
+			t.Errorf("localBuild(%q) = %v, want %v", v, got, want)
+		}
+	}
+}
+
 func TestNewest(t *testing.T) {
 	files := []shareFile{
 		{Name: "Publisher-0.1.9-portable.zip"},

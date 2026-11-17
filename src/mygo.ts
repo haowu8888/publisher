@@ -180,6 +180,13 @@ export interface UpdateState {
    * folder; an installed copy runs the new installer.
    */
   portable: boolean;
+  /**
+   * Local is a copy built on this computer: its version keeps the
+   * x.y.0 of mygo.config.ts, which Flow never gives (0.1.<run>), so
+   * every build on the drive looks newer though it may hold older code.
+   * It is not checked by itself.
+   */
+  local: boolean;
   file?: string;
   size?: number;
   /** Unix milliseconds */

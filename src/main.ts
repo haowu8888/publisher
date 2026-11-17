@@ -46,6 +46,43 @@ function toast(msg: string, error = false) {
   toastTimer = window.setTimeout(() => (el.hidden = true), error ? 6000 : 2500);
 }
 
+interface AskOptions {
+  title?: string;
+  ok?: string;
+  cancel?: string;
+  // danger paints the confirming button red, for deleting.
+  danger?: boolean;
+  // detail lists what the action touches, in a box that scrolls.
+  detail?: string[];
+}
+
+// ask asks the user to confirm in a dialog of the app's own look, in place
+// of the browser's confirm(). Escape, the cancel button or a click beside
+// the dialog says no.
+function ask(message: string, opts: AskOptions = {}): Promise<boolean> {
+  const dlg = $<HTMLDialogElement>("#ask");
+  // One question at a time: a second one while the first is open, as from
+  // a double click, is answered no (showModal would throw).
+  if (dlg.open) return Promise.resolve(false);
+  dlg.innerHTML = `<form method="dialog">
+      ${opts.title ? `<h3>${esc(opts.title)}</h3>` : ""}
+      <p>${esc(message)}</p>
+      ${opts.detail?.length ? `<ul class="ask-detail">${opts.detail.map((d) => `<li>${esc(d)}</li>`).join("")}</ul>` : ""}
+      <div class="ask-buttons">
+        <button value="no" type="submit">${esc(opts.cancel ?? "取消")}</button>
+        <button value="yes" type="submit" class="${opts.danger ? "danger-fill" : "primary"}" autofocus>${esc(opts.ok ?? "确定")}</button>
+      </div>
+    </form>`;
+  return new Promise((resolve) => {
+    dlg.returnValue = "";
+    dlg.onclose = () => resolve(dlg.returnValue === "yes");
+    dlg.onclick = (e) => {
+      if (e.target === dlg) dlg.close("no"); // the backdrop
+    };
+    dlg.showModal();
+  });
+}
+
 // Runs an action, showing its error instead of throwing.
 async function attempt<T>(fn: () => Promise<T>): Promise<T | undefined> {
   try {
@@ -83,6 +120,8 @@ function setView(v: View) {
   state.view = v;
   document.querySelectorAll<HTMLButtonElement>(".nav-item").forEach((b) => b.classList.toggle("active", b.dataset.view === v));
   render();
+  // A fade on switching pages only: the pages draw again on every change.
+  view.animate([{ opacity: 0, transform: "translateY(4px)" }, { opacity: 1, transform: "none" }], { duration: 160, easing: "ease-out" });
   // The pending list snapshots titles and platforms; edits since then would show stale.
   if (v === "schedule") refreshSchedule();
   // New files may have landed in the sync folders.
@@ -93,12 +132,22 @@ document.querySelectorAll<HTMLButtonElement>(".nav-item").forEach((b) =>
   b.addEventListener("click", async () => (await keepEdits()) && setView(b.dataset.view as View)),
 );
 
+// renderedView is the page last drawn, whose scroll a redraw of the same
+// page keeps: pages draw again on every change, as the tasks page does at
+// each step of an upload, and would jump back to the top.
+let renderedView: View | "" = "";
+
 function render() {
+  const body = view.querySelector<HTMLElement>(".view-body");
+  const top = renderedView === state.view ? (body?.scrollTop ?? 0) : 0;
   if (state.view === "library") renderLibrary();
   else if (state.view === "accounts") renderAccounts();
   else if (state.view === "schedule") renderSchedule();
   else if (state.view === "settings") renderSettings();
   else renderTasks();
+  renderedView = state.view;
+  const again = view.querySelector<HTMLElement>(".view-body");
+  if (again) again.scrollTop = top;
   renderBadge();
 }
 
@@ -621,12 +670,15 @@ async function checkAll() {
 
 // Opens the login page of every platform that is logged out, or of every
 // one when all are logged in, each in its own tab.
-function loginAll() {
+async function loginAll() {
   let ids = state.accounts.filter((a) => !a.loggedIn).map((a) => a.id);
   if (ids.length === 0) {
-    if (!confirm("所有平台都显示已登录，要全部重新登录吗？")) return;
+    if (!(await ask("所有平台都显示已登录，要全部重新登录吗？", { title: "全部重新登录", ok: "全部重新登录" }))) return;
     ids = state.accounts.map((a) => a.id);
-  } else if (!confirm(`在自动化浏览器里打开 ${ids.map(platformName).join("、")} 的登录页？请逐个扫码登录。`)) return;
+  } else if (
+    !(await ask(`在自动化浏览器里打开 ${ids.map(platformName).join("、")} 的登录页，请逐个扫码登录。`, { title: "打开登录页", ok: "打开" }))
+  )
+    return;
   ids.forEach((id) => void login(id));
 }
 
@@ -691,6 +743,9 @@ function renderTasks() {
 
 events.taskUpdated.on((t) => {
   const i = state.tasks.findIndex((x) => x.id === t.id);
+  // Most updates are a new step of the same task, which the pending list
+  // of the schedule does not show.
+  const moved = state.tasks[i]?.status !== t.status;
   if (i >= 0) state.tasks[i] = t;
   else state.tasks.unshift(t);
   if (t.status === "review") toast(`${platformName(t.platform)}：已填好，请到浏览器确认提交`);
@@ -705,7 +760,7 @@ events.taskUpdated.on((t) => {
   // parts follow along there.
   if (state.view === "library") refreshLibraryTasks();
   else if (state.view === "tasks") render();
-  else if (state.view === "schedule") refreshSchedule();
+  else if (state.view === "schedule" && moved) refreshSchedule();
   renderBadge();
 });
 
@@ -736,6 +791,10 @@ function renderSchedule() {
   const info = state.schedule;
   if (!info) return;
   const sc = info.schedule;
+  // Drawn again after every run and save; the pending list keeps its
+  // place while it shows the same kind (render keeps the page's).
+  const old = document.querySelector<HTMLElement>("ol.pending");
+  const top = old?.dataset.kind === state.kind ? old.scrollTop : 0;
   const kinds: [string, string][] = [
     ["video", "视频发布到"],
     ["article", "文章发布到"],
@@ -783,6 +842,8 @@ function renderSchedule() {
       </div>
       <div class="section" id="pending">${pendingSection(info)}</div>
     </div>`;
+  const list = view.querySelector<HTMLElement>("ol.pending");
+  if (list) list.scrollTop = top;
 }
 
 function kindLabel(k: string) {
@@ -809,7 +870,7 @@ function pendingSection(info: ScheduleInfo) {
     ${
       list.length === 0
         ? `<div class="muted">没有待发布的${state.kind === "video" ? "视频" : "文章"}。导入新素材，或在上面勾选要发布的平台。</div>`
-        : `<ol class="pending">${list
+        : `<ol class="pending scroll" data-kind="${state.kind}">${list
             .map(
               (p) => `<li><span class="kind ${p.kind}">${p.kind === "video" ? "视频" : "文章"}</span>
                 <span class="t">${esc(p.title || "（无标题）")}</span>
@@ -940,15 +1001,12 @@ function renderSettings() {
   const range = (key: string, title: string, note: string, value: number, lo: number, hi: number, unit: string) => `<div class="setting">
       <span class="label"><strong>${title}</strong><small>${note}</small></span>
       <span class="range"><input type="range" data-ui="${key}" min="${lo}" max="${hi}" value="${value}" /><output>${value}${unit}</output></span></div>`;
-  // Every change draws the page again, which would scroll it back to the
-  // top, away from the slider being moved; it keeps its place instead.
-  const top = document.querySelector<HTMLElement>(".settings-body")?.scrollTop ?? 0;
   const check = (id: string, on: boolean, title: string, note: string) => `<label class="setting">
       <span class="label"><strong>${title}</strong><small>${note}</small></span>
       <input type="checkbox" data-setting="${id}" ${on ? "checked" : ""} /></label>`;
   view.innerHTML = `
     <div class="view-head"><h2>设置</h2></div>
-    <div class="view-body settings-body">
+    <div class="view-body">
       <div class="section">
         <h3>常规</h3>
         ${check("openAtLogin", info.openAtLogin, "开机自启", "登录 Windows 后自动启动，并直接隐藏到托盘，定时发布照常进行")}
@@ -1023,7 +1081,6 @@ function renderSettings() {
         <div class="muted"><small>素材、任务、设置都在 data.json 里；chrome-profile 是自动化浏览器的登录信息。</small></div>
       </div>
     </div>`;
-  view.querySelector(".settings-body")!.scrollTop = top;
 }
 
 const mb = (n: number) => `${(n / 1048576).toFixed(1)} MB`;
@@ -1041,7 +1098,8 @@ function updateRow() {
   else if (u?.newer) note = `有新版本 ${esc(u.latest ?? "")}（${u.published ? `${when(u.published)} 发布，` : ""}${mb(u.size ?? 0)}）`;
   else if (u?.checked) note = `已是最新（网盘最新 ${esc(u.latest ?? "")}，${when(u.checked)} 检查）`;
   const busy = u?.checking || u?.installing;
-  return `<span class="label"><strong>版本 ${esc(current || "开发版")}</strong><small>${note}</small></span>
+  if (u?.local && !u.installing && !u.checking && !u.error) note = `本地构建，不自动检查；${note}`;
+  return `<span class="label"><strong>版本 ${esc(current || "开发版")}${u?.local ? ` <span class="pill">本地构建</span>` : ""}</strong><small>${note}</small></span>
     <span class="row-buttons"><button data-act="check-update" ${busy ? "disabled" : ""}>检查更新</button>${
       u?.newer ? `<button class="primary" data-act="install-update" ${busy ? "disabled" : ""}>${u.installing ? "正在更新…" : `更新到 ${esc(u.latest ?? "")}`}</button>` : ""
     }</span>`;
@@ -1135,14 +1193,13 @@ view.addEventListener("click", async (e) => {
   if (d.done) return void attempt(() => Publisher.markDone(d.done!));
   if (d.delTask) {
     const waiting = state.tasks.find((t) => t.id === d.delTask)?.status === "review";
-    if (
-      !confirm(
-        waiting
-          ? "这条任务还在等你确认提交。如果已经在浏览器里提交了，请先点「我已提交」；直接删除的话，素材会算作没发过，定时发布可能再发一次。仍要删除吗？"
-          : "删除这条任务记录？（已发布的状态会保留）",
-      )
-    )
-      return;
+    const sure = waiting
+      ? await ask(
+          "这条任务还在等你确认提交。如果已经在浏览器里提交了，请先点「我已提交」；直接删除的话，素材会算作没发过，定时发布可能再发一次。",
+          { title: "删除待确认的任务", ok: "仍要删除", danger: true },
+        )
+      : await ask("已发布的状态会保留。", { title: "删除这条任务记录？", ok: "删除", danger: true });
+    if (!sure) return;
     if (!(await attempt(() => Publisher.delete(d.delTask!).then(() => true)))) return;
     state.tasks = state.tasks.filter((t) => t.id !== d.delTask);
     if (state.view === "library") refreshLibraryTasks();
@@ -1172,12 +1229,12 @@ view.addEventListener("click", async (e) => {
       state.folders = fs;
       render();
       const f = fs.length > before ? fs.at(-1)! : undefined;
-      if (!f?.new || !confirm(`${f.dir}\n里有 ${f.new} 个新文件，现在导入吗？`)) return;
+      if (!f?.new || !(await ask(`${f.dir} 里有 ${f.new} 个新文件，现在导入吗？`, { title: "导入新文件", ok: "导入" }))) return;
       await importWith(() => Library.syncFolders(), "没有新文件");
       return refreshFolders();
     }
     case "remove-folder":
-      if (!confirm(`不再同步 ${d.dir}？（已导入的素材会保留）`)) return;
+      if (!(await ask(`不再同步 ${d.dir}，已导入的素材会保留。`, { title: "移除同步文件夹", ok: "移除", danger: true }))) return;
       state.folders = (await attempt(() => Library.removeFolder(d.dir!))) ?? state.folders;
       return render();
     case "sync-folders":
@@ -1188,7 +1245,7 @@ view.addEventListener("click", async (e) => {
       if (await saveSelected()) toast("已保存");
       return render();
     case "delete":
-      if (!sel || !confirm(`删除素材「${sel.title}」？（不会删除文件）`)) return;
+      if (!sel || !(await ask(`「${sel.title}」会从素材库移除，不会删除文件。`, { title: "删除素材", ok: "删除", danger: true }))) return;
       if (!(await attempt(() => Library.delete(sel.id).then(() => true)))) return;
       state.materials = state.materials.filter((m) => m.id !== sel.id);
       state.selected = "";
@@ -1197,7 +1254,15 @@ view.addEventListener("click", async (e) => {
     case "delete-published": {
       const done = state.materials.filter(published);
       if (done.length === 0) return toast("没有全部发布成功的素材", true);
-      if (!confirm(`删除 ${done.length} 个已全部发布成功的素材？（不会删除文件；任务记录保留，可在任务页「清除已结束」）\n\n${done.map((m) => m.title).join("\n")}`)) return;
+      if (
+        !(await ask(`删除 ${done.length} 个已全部发布成功的素材？不会删除文件；任务记录保留，可在任务页「清除已结束」。`, {
+          title: "清理已发布",
+          ok: "删除",
+          danger: true,
+          detail: done.map((m) => m.title),
+        }))
+      )
+        return;
       const ids = await attempt(() => Library.deletePublished());
       if (!ids) return;
       state.materials = state.materials.filter((m) => !ids.includes(m.id));
@@ -1213,7 +1278,7 @@ view.addEventListener("click", async (e) => {
       return render();
     }
     case "run-schedule": {
-      if (!confirm("现在就全自动发布下一批素材？")) return;
+      if (!(await ask("现在就全自动发布下一批素材？", { title: "立即发布下一批", ok: "发布" }))) return;
       const info = await attempt(() => Scheduler.runNow());
       if (info) state.schedule = info;
       return render();
@@ -1244,7 +1309,8 @@ view.addEventListener("click", async (e) => {
       if (!m) return;
       if (!m.title.trim()) return toast("标题不能为空", true);
       const offline = picks.filter((id) => !state.accounts.find((a) => a.id === id)?.loggedIn);
-      if (offline.length && !confirm(`${offline.map(platformName).join("、")} 可能未登录，仍要继续吗？`)) return;
+      if (offline.length && !(await ask(`${offline.map(platformName).join("、")} 可能未登录，仍要继续吗？`, { title: "平台可能未登录", ok: "继续" })))
+        return;
       const tasks = await attempt(() => Publisher.publish(m.id, picks, state.mode));
       if (tasks) toast(`已加入 ${tasks.length} 个发布任务`);
       return;
@@ -1267,15 +1333,21 @@ view.addEventListener("click", async (e) => {
       return;
     }
     case "reset-look":
-      if (!confirm("把主题色、风格、圆角、缩放和背景图片都恢复默认？")) return;
+      if (!(await ask("主题色、风格、圆角、缩放和背景图片都恢复默认，深浅色不变。", { title: "恢复默认外观", ok: "恢复默认" }))) return;
       await attempt(() => Settings.clearBackground());
       return saveSettings((s) => (s.settings.ui = {}));
     case "check-update":
       return void Updates.check().catch(() => {}); // the row shows the error
     case "install-update": {
       const u = state.update;
-      const how = u?.portable ? "覆盖当前文件夹里的程序" : "静默运行新安装包";
-      if (!u || !confirm(`下载 ${u.latest}（${mb(u.size ?? 0)}）后 Publisher 会退出，${how}，装好后自动重新打开。现在更新？`)) return;
+      if (!u) return;
+      const how = u.portable ? "覆盖当前文件夹里的程序" : "静默运行新安装包";
+      const notes = [`下载 ${mb(u.size ?? 0)} 后 Publisher 会退出，${how}，装好后自动重新打开。`];
+      // Quitting closes the browser, and with it the forms waiting there.
+      const review = state.tasks.filter((t) => t.status === "review").length;
+      if (review) notes.push(`还有 ${review} 个「待确认」的任务，浏览器里填好的页面会随应用一起关闭，没提交的需要重新发布。`);
+      if (u.local) notes.push(`当前是本地构建（${u.current}），网盘上的 ${u.latest} 不一定比本地代码新，更新会用它覆盖当前文件夹。`);
+      if (!(await ask(notes.join("\n\n"), { title: `更新到 ${u.latest}`, ok: "下载并更新", danger: review > 0 || u.local }))) return;
       return void attempt(() => Updates.install());
     }
     case "check-all":
@@ -1287,8 +1359,8 @@ view.addEventListener("click", async (e) => {
       return toast("已关闭自动化浏览器");
     case "retry-failed": {
       const failed = state.tasks.filter((t) => taskKind(t) === state.kind && retryable(t));
-      const names = failed.map((t) => `${platformName(t.platform)}：${taskTitle(t)}`).join("\n");
-      if (!failed.length || !confirm(`把 ${failed.length} 个失败的任务重新排队发布？\n\n${names}`)) return;
+      const names = failed.map((t) => `${platformName(t.platform)}：${taskTitle(t)}`);
+      if (!failed.length || !(await ask(`把 ${failed.length} 个失败的任务重新排队发布？`, { title: "重试失败的任务", ok: "重新排队", detail: names }))) return;
       for (const t of failed) await attempt(() => Publisher.retry(t.id));
       return;
     }
