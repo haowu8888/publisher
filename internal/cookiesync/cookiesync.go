@@ -6,14 +6,15 @@
 // The server listens on 127.0.0.1 only and takes imports from extensions
 // only: browsers put the Origin on every POST, a web page's being http(s),
 // and a JSON body makes them ask first with a preflight this server
-// refuses. An extension's GET carries no Origin, so the domain list, which
-// is no secret, is open to any local caller but web pages.
+// refuses. An extension's GET carries no Origin, so the platform and domain
+// lists, which are no secret, are open to any local caller but web pages.
 package cookiesync
 
 import (
 	"encoding/json"
 	"net"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -78,13 +79,36 @@ func (c Cookie) Param() *proto.NetworkCookieParam {
 	return p
 }
 
+// Platform is a platform as the extension lists it, to sync all or some.
+type Platform struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	// Domains hold its login cookies; empty when Note says why its login
+	// cannot be copied.
+	Domains []string `json:"domains"`
+	Note    string   `json:"note,omitempty"`
+}
+
 // Handler serves the extension.
 type Handler struct {
-	// Domains lists the cookie domains of the platforms.
-	Domains func() []string
-	// Import stores cookies, already limited to Domains, and returns the
-	// reply for the extension.
+	// Platforms lists the platforms in the app's order.
+	Platforms func() []Platform
+	// Import stores cookies, already limited to the platforms' domains, and
+	// returns the reply for the extension.
 	Import func(cookies []Cookie) (any, error)
+}
+
+// domains lists the platforms' cookie domains once each.
+func (h *Handler) domains() []string {
+	out := []string{}
+	for _, p := range h.Platforms() {
+		for _, d := range p.Domains {
+			if !slices.Contains(out, d) {
+				out = append(out, d)
+			}
+		}
+	}
+	return out
 }
 
 func isExtension(origin string) bool {
@@ -98,8 +122,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	switch {
+	case r.Method == http.MethodGet && r.URL.Path == "/platforms":
+		writeJSON(w, h.Platforms())
 	case r.Method == http.MethodGet && r.URL.Path == "/domains":
-		writeJSON(w, h.Domains())
+		// For extensions before 0.3, which sync all platforms only.
+		writeJSON(w, h.domains())
 	case r.Method == http.MethodPost && r.URL.Path == "/import":
 		if !strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") {
 			http.Error(w, "json expected", http.StatusUnsupportedMediaType)
@@ -112,7 +139,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		domains := h.Domains()
+		domains := h.domains()
 		var keep []Cookie
 		for _, c := range body.Cookies {
 			for _, d := range domains {

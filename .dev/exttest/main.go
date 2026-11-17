@@ -1,5 +1,5 @@
 // Command exttest loads resources/extension in a Chromium holding fake
-// platform cookies, clicks its sync button, and prints what the app's sync
+// platform cookies, clicks its sync-all button, and prints what the app's sync
 // server received. It runs in the Linux container:
 //
 //	go run ./.dev/exttest <chromium binary>
@@ -36,7 +36,7 @@ func extensionID(dir string) string {
 func main() {
 	got := make(chan []cookiesync.Cookie, 1)
 	h := &cookiesync.Handler{
-		Domains: platforms.CookieDomains,
+		Platforms: platforms.SyncPlatforms,
 		Import: func(c []cookiesync.Cookie) (any, error) {
 			got <- c
 			return map[string]any{"imported": len(c), "failed": 0, "platforms": []map[string]string{
@@ -67,12 +67,12 @@ func main() {
 	page := b.MustPage("")
 	for i := 0; ; i++ {
 		page.MustNavigate("chrome-extension://" + extensionID(dir) + "/popup.html").MustWaitLoad()
-		if ok, _, _ := page.Has("#sync"); ok || i == 20 {
+		if ok, _, _ := page.Has("#sync-all"); ok || i == 20 {
 			break
 		}
 		time.Sleep(500 * time.Millisecond)
 	}
-	page.MustElement("#sync").MustClick()
+	page.MustElement("#sync-all").MustClick()
 	page.Timeout(15*time.Second).MustElementR("#status", "已导入|失败|连不上|没有")
 	fmt.Println("popup:", page.MustElement("#status").MustText())
 	select {

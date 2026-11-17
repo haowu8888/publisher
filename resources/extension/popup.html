@@ -22,6 +22,15 @@
         background: var(--accent); color: #fff; font: inherit; font-weight: 600;
       }
       button:disabled { opacity: 0.6; cursor: default; }
+      button.ghost { background: none; color: var(--accent); border: 1px solid var(--accent); margin-top: 8px; }
+      #platforms { list-style: none; margin: 0 0 12px; padding: 0; border-top: 1px solid var(--line); }
+      #platforms:empty { display: none; }
+      #platforms li { display: block; padding: 0; border: none; }
+      #platforms label { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--line); cursor: pointer; }
+      #platforms label.off { cursor: default; color: var(--muted); }
+      #platforms .name { flex: 1; }
+      #platforms small { color: var(--muted); font-size: 12px; }
+      #platforms input { margin: 0; accent-color: var(--accent); }
       #status { margin-top: 12px; }
       #status:empty { display: none; }
       .err { color: var(--bad); }
@@ -35,7 +44,9 @@
   <body>
     <h1>同步登录到 Publisher</h1>
     <p>把本浏览器里 B站、抖音、快手、小红书、公众号的登录状态复制给 Publisher 应用。请先打开 Publisher。</p>
-    <button id="sync">同步</button>
+    <ul id="platforms"></ul>
+    <button id="sync-all">一键同步全部</button>
+    <button id="sync-picked" class="ghost" hidden>同步所选</button>
     <div id="status"></div>
     <script src="popup.js"></script>
   </body>

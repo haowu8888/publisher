@@ -24,8 +24,10 @@ func TestParam(t *testing.T) {
 func TestHandler(t *testing.T) {
 	var got []Cookie
 	h := &Handler{
-		Domains: func() []string { return []string{"bilibili.com"} },
-		Import:  func(c []Cookie) (any, error) { got = c; return map[string]int{"n": len(c)}, nil },
+		Platforms: func() []Platform {
+			return []Platform{{ID: "bilibili", Name: "哔哩哔哩", Domains: []string{"bilibili.com"}}, {ID: "douyin", Note: "扫码"}}
+		},
+		Import: func(c []Cookie) (any, error) { got = c; return map[string]int{"n": len(c)}, nil },
 	}
 	body := `{"cookies":[{"name":"SESSDATA","value":"1","domain":".bilibili.com"},
 		{"name":"x","value":"1","domain":"member.bilibili.com"},
@@ -57,15 +59,20 @@ func TestHandler(t *testing.T) {
 		}
 	}
 
-	for origin, want := range map[string]int{"": 200, "chrome-extension://abc": 200, "https://evil.com": 403} {
-		r := httptest.NewRequest("GET", "/domains", nil)
-		if origin != "" {
-			r.Header.Set("Origin", origin)
-		}
-		w := httptest.NewRecorder()
-		h.ServeHTTP(w, r)
-		if w.Code != want {
-			t.Errorf("GET /domains from %q: status %d, want %d", origin, w.Code, want)
+	for _, path := range []string{"/domains", "/platforms"} {
+		for origin, want := range map[string]int{"": 200, "chrome-extension://abc": 200, "https://evil.com": 403} {
+			r := httptest.NewRequest("GET", path, nil)
+			if origin != "" {
+				r.Header.Set("Origin", origin)
+			}
+			w := httptest.NewRecorder()
+			h.ServeHTTP(w, r)
+			if w.Code != want {
+				t.Errorf("GET %s from %q: status %d, want %d", path, origin, w.Code, want)
+			}
+			if want == http.StatusOK && path == "/domains" && strings.TrimSpace(w.Body.String()) != `["bilibili.com"]` {
+				t.Errorf("GET /domains: %s", w.Body)
+			}
 		}
 	}
 }

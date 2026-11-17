@@ -37,8 +37,8 @@ func main() {
 	}, func(id string) { accounts.record(platforms.Get(id), false) })
 
 	accounts.syncErr = cookiesync.Listen(&cookiesync.Handler{
-		Domains: platforms.CookieDomains,
-		Import:  accounts.importCookies,
+		Platforms: platforms.SyncPlatforms,
+		Import:    accounts.importCookies,
 	})
 
 	library := &Library{store: s}
@@ -46,6 +46,9 @@ func main() {
 	mygo.Bind(accounts)
 	mygo.Bind(&Publisher{store: s, queue: q})
 	mygo.Bind(&Settings{store: s, dataDir: dir})
+	updates := &Updates{store: s}
+	mygo.Bind(updates)
+	go updates.watch()
 	applyTheme(s.Settings())
 	// The schedule's runs bring in the sync folders' new files first, when
 	// the settings say so.

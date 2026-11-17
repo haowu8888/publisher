@@ -12,6 +12,7 @@ import (
 	"unicode/utf8"
 
 	"publisher/internal/browser"
+	"publisher/internal/cookiesync"
 	"publisher/internal/store"
 
 	"github.com/go-rod/rod"
@@ -198,19 +199,16 @@ func (p *Platform) Owns(domain string) bool {
 	return false
 }
 
-// CookieDomains lists the cookie domains of all platforms whose logins can
-// be copied, once each.
-func CookieDomains() []string {
-	var out []string
+// SyncPlatforms lists the platforms for the cookie sync extension; those
+// whose logins cannot be copied come without domains, with the reason.
+func SyncPlatforms() []cookiesync.Platform {
+	out := []cookiesync.Platform{}
 	for _, p := range All {
+		sp := cookiesync.Platform{ID: p.ID, Name: p.Name, Domains: p.CookieDomains, Note: p.LoginNote}
 		if p.LoginNote != "" {
-			continue
+			sp.Domains = nil
 		}
-		for _, d := range p.CookieDomains {
-			if !slices.Contains(out, d) {
-				out = append(out, d)
-			}
-		}
+		out = append(out, sp)
 	}
 	return out
 }

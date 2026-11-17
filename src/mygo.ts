@@ -103,6 +103,7 @@ export interface Settings {
   collections?: Record<string, string>;
   original?: boolean;
   autoSync?: boolean;
+  noUpdateCheck?: boolean;
 }
 
 /** SettingsInfo is the settings with what the system says. */
@@ -153,6 +154,28 @@ export interface Task {
   error?: string;
   createdAt: string;
   updatedAt: string;
+}
+
+/** UpdateState is what the settings page shows of updates. */
+export interface UpdateState {
+  current: string;
+  latest?: string;
+  newer: boolean;
+  /**
+   * Portable is a copy run from the zip, which an update replaces in its
+   * folder; an installed copy runs the new installer.
+   */
+  portable: boolean;
+  file?: string;
+  size?: number;
+  /** Unix milliseconds */
+  published?: number;
+  checked?: number;
+  checking: boolean;
+  /** While installing: the bytes downloaded of Size. */
+  installing: boolean;
+  done: number;
+  error?: string;
 }
 
 // ---- Services ----
@@ -344,6 +367,26 @@ export const Settings = {
   },
 } as const;
 
+/** Updates checks the share for a newer build and installs it. */
+export const Updates = {
+  /** Check looks for a newer build in the share. */
+  check(): Promise<UpdateState> {
+    return call("Updates.Check");
+  },
+  /**
+   * Install downloads the newer build, quits, and lets a script put it in
+   * place and start it again. It waits for no task: a running publish would
+   * be cut off, so it refuses while there is one.
+   */
+  install(): Promise<void> {
+    return call("Updates.Install");
+  },
+  /** State returns what is known without checking. */
+  state(): Promise<UpdateState> {
+    return call("Updates.State");
+  },
+} as const;
+
 /**
  * Scheduler sets up publishing the library's unpublished materials at set
  * times of day.
@@ -378,4 +421,6 @@ export const events = {
   cookiesSynced: event<SyncResult>("cookiesSynced"),
   /** ScheduleRan is sent after each run of the schedule. */
   scheduleRan: event<Schedule>("scheduleRan"),
+  /** UpdateChanged is sent whenever a check or a download moves on. */
+  updateChanged: event<UpdateState>("updateChanged"),
 } as const;

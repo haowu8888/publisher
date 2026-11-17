@@ -22,11 +22,12 @@
   - `Publisher.Delete`：删除单条任务（排队中、进行中的要先取消）；`Publisher.ClearFinished` 保留「待确认」的任务，删了素材会算作没发过、被定时再发
   - `Publisher`：创建、取消、重试发布任务
   - `Scheduler`：定时发布的设置、待发布列表、立即运行
-  - `Settings`：设置页。开机自启用 `mygo.App.SetOpenAtLogin`（写 HKCU Run，带登录参数启动时窗口 `Hidden` 直接进托盘），不存数据；其余存在 `data.json` 的 `settings`（零值即默认）：`theme`（空=跟随系统，用 `mygo.Theme.SetSource`，页面同时设 `color-scheme`）、`quitOnClose`（关窗口直接退出）、`keepBrowser`（全自动任务后不关浏览器）、`autoSync`（定时发布前自动同步文件夹）、`collections`（各平台默认合集名，平台 id → 名称）、`original`（小红书声明原创）
-  - 事件 `taskUpdated`、`accountUpdated`、`cookiesSynced`、`scheduleRan`
+  - `Settings`：设置页。开机自启用 `mygo.App.SetOpenAtLogin`（写 HKCU Run，带登录参数启动时窗口 `Hidden` 直接进托盘），不存数据；其余存在 `data.json` 的 `settings`（零值即默认）：`theme`（空=跟随系统，用 `mygo.Theme.SetSource`，页面同时设 `color-scheme`）、`quitOnClose`（关窗口直接退出）、`keepBrowser`（全自动任务后不关浏览器）、`autoSync`（定时发布前自动同步文件夹）、`noUpdateCheck`（不自动检查更新）、`collections`（各平台默认合集名，平台 id → 名称）、`original`（小红书声明原创）
+  - `Updates`（`updater.go`）：设置页的「检查更新」。Flow 流水线 `publisher` 每次构建把 `Publisher-<版本>-setup.exe` 和 `Publisher-<版本>-portable.zip` 传到 Cloudreve `/builds/publisher`（只留最新一版，公开分享 `19I6`），版本号 = `mygo.config.ts` 的主次版本 + 运行号（0.1.<运行号>，流水线构建时改写，仓库里保持 0.1.0）；应用匿名调 Cloudreve v4 API 列出分享里的文件、按文件名比版本。安装版（exe 旁有 `Uninstall.exe`）下载 setup 后静默 `/S` 安装，免安装版下载 zip 解压后覆盖文件夹（含 `extension/`），都由 `updater_windows.go` 的 PowerShell 脚本等应用退出后执行并重新启动（日志在 `%TEMP%\publisher-update-*\update.log`）。有排队中或进行中的任务时拒绝更新。启动 1 分钟后和之后每 6 小时自动检查（设置 `noUpdateCheck` 关掉），有新版时侧栏「设置」显示「新」。本地构建的 `build/windows-amd64` 没有 `Uninstall.exe`，会被当成免安装版
+  - 事件 `taskUpdated`、`accountUpdated`、`cookiesSynced`、`scheduleRan`、`updateChanged`
 - `internal/store`：JSON 存储，位置是 `%AppData%\Publisher\data.json`。每次正常打开时另存一份 `data.json.bak`；`data.json` 读不了时改名为 `.corrupt`、换用备份，并关掉定时发布（备份之后发布过的素材会显示成未发布），`main.go` 弹框说明（`Store.Restored`）。任务只改了步骤文字（`Step`）时不写文件，上传时每 2 秒一次进度没必要落盘，所以 `data.json` 和 `.dev/tasks.sh` 里的步骤可能是旧的，状态是准的
-- `internal/cookiesync` + `resources/extension/`：从用户日常 Chrome 同步登录。原因是 Chrome 136 起不再允许用调试端口接管默认配置目录，所以改用配套扩展（MV3）：扩展读取各平台的 Cookie，POST 到 `127.0.0.1:17891/import`，应用再用 `Storage.setCookies` 写进自动化 Chrome，之后检测登录状态
-  - 安全规则：POST 必须带 `chrome-extension://` 来源且是 JSON；GET `/domains` 扩展请求不带 Origin，所以放行（网页来源除外）
+- `internal/cookiesync` + `resources/extension/`：从用户日常 Chrome 同步登录。原因是 Chrome 136 起不再允许用调试端口接管默认配置目录，所以改用配套扩展（MV3）：扩展从 GET `/platforms`（`platforms.SyncPlatforms`：各平台 id、名称、Cookie 域名，不能同步的不给域名、带原因）列出平台和本浏览器里的 Cookie 数，可「一键同步全部」或勾选后「同步所选」（没勾的记在扩展的 `localStorage`），读取所选平台的 Cookie，POST 到 `127.0.0.1:17891/import`，应用再用 `Storage.setCookies` 写进自动化 Chrome，之后检测这些平台的登录状态。GET `/domains` 留给 0.3 之前只能全部同步的旧扩展，新扩展连旧应用时也退回用它
+  - 安全规则：POST 必须带 `chrome-extension://` 来源且是 JSON；GET `/platforms`、`/domains` 扩展请求不带 Origin，所以放行（网页来源除外）
   - 平台的 Cookie 域名在 `Platform.CookieDomains` 里，新增域名时要同步改扩展 `manifest.json` 的 `host_permissions`
   - 抖音不参与同步（`LoginNote`）：它的写请求用存在页面存储里的密钥签名，只复制 Cookie 时显示已登录，但提交会提示「登录失效」。必须在应用里扫码；「登录」会先清掉该平台旧 Cookie；检测登录看首页有没有「扫码登录」（`LoginText`），不看 Cookie。服务端注销会话后 Cookie 还在，页面原地显示登录框，所以 `loggedOut` 也看页面上有没有「扫码登录」；任务因未登录失败时会把账号标成未登录（`queue.New` 的 `onLoggedOut` → `Accounts.record`，同时发 `accountUpdated`）
   - `resources/` 的内容会被复制到 exe 旁边，所以扩展目录在 `build/windows-amd64/extension`
@@ -83,6 +84,6 @@
 - `tasks.sh [n]`：打印最新的 n 个任务；`stop.ps1`：结束应用和它的自动化 Chrome（只杀应用配置目录的那个）
 - `toast.ps1`：连拍屏幕右下角（系统通知出现的位置）到 `.dev/toast1..3.png`，同样要通过交互式计划任务运行
 - `dialog/`：应答卡住标签页的原生弹窗；`screen.ps1`、`windows.ps1`：截取指定窗口（被遮挡也能截）、列出桌面窗口标题，要通过交互式计划任务 `PublisherShot` 运行
-- `exttest/`：在容器里用 Playwright 的 Chromium 加载扩展，配合假 Cookie 端到端测试同步。运行 `go run ./.dev/exttest ~/.cache/ms-playwright/chromium-1140/chrome-linux/chrome`
+- `exttest/`：在容器里用 Playwright 的 Chromium 加载扩展，配合假 Cookie 端到端测试「一键同步全部」。运行 `go run ./.dev/exttest ~/.cache/ms-playwright/chromium-1140/chrome-linux/chrome`
 - `sync-test.ps1`：在宿主机上模拟扩展，往运行中的应用 POST 一条测试 Cookie
 - `data.json` 和测试音视频：可复制到 `%AppData%\Publisher\` 作为种子数据；`测试视频_cover.jpg` 是和视频画面明显不同的 9:16 竖版封面，用来看封面有没有真的设上；`测试图文.md` + `测试图文/` 是带封面和正文图片的测试文章

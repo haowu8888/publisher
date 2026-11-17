@@ -2,8 +2,8 @@
 // form, the platform accounts, the publish tasks, the schedule, and the settings. State lives here and
 // each view re-renders from it; Go pushes task and account changes as events.
 import { onFileDrop } from "mygo-runtime";
-import { Accounts, Library, Publisher, Scheduler, Settings, events } from "./mygo";
-import type { AccountInfo, FolderInfo, Material, ScheduleInfo, SettingsInfo, SyncInfo, Task } from "./mygo";
+import { Accounts, Library, Publisher, Scheduler, Settings, Updates, events } from "./mygo";
+import type { AccountInfo, FolderInfo, Material, ScheduleInfo, SettingsInfo, SyncInfo, Task, UpdateState } from "./mygo";
 
 type View = "library" | "accounts" | "tasks" | "schedule" | "settings";
 
@@ -27,6 +27,7 @@ const state = {
   folders: [] as FolderInfo[],
   showFolders: false,
   settings: null as SettingsInfo | null,
+  update: null as UpdateState | null,
 };
 
 const $ = <T extends HTMLElement>(sel: string, root: ParentNode = document) => root.querySelector<T>(sel)!;
@@ -107,6 +108,7 @@ function renderBadge() {
   el.hidden = n === 0;
   el.textContent = String(n);
   $("#schedule-on").hidden = !state.schedule?.schedule.enabled;
+  $("#update-badge").hidden = !state.update?.newer;
 }
 
 // ---- Library ----
@@ -563,7 +565,7 @@ function renderAccounts() {
         <ol>
           <li>在 Chrome 地址栏打开 <code>chrome://extensions</code>，打开右上角「开发者模式」</li>
           <li>点「加载已解压的扩展程序」，选择扩展目录 <span class="path">${esc(state.sync?.extensionDir ?? "")}</span></li>
-          <li>保持本应用打开，点 Chrome 工具栏里的「Publisher 登录同步」扩展 →「同步」</li>
+          <li>保持本应用打开，点 Chrome 工具栏里的「Publisher 登录同步」扩展 →「一键同步全部」，或勾选平台后「同步所选」（已装旧版扩展的，在扩展页点它的刷新按钮更新）</li>
         </ol>
         ${state.sync?.error ? `<div class="err">${esc(state.sync.error)}</div>` : ""}
         <div class="row">
@@ -914,15 +916,50 @@ function renderSettings() {
         ${check("original", !!st.original, "小红书声明原创", "发布笔记时打开「原创声明」并同意须知；视频短于 10 秒等平台不支持的笔记会跳过")}
       </div>
       <div class="section">
+        <h3>更新</h3>
+        <div class="setting" id="update-row">${updateRow()}</div>
+        ${check("updateCheck", !st.noUpdateCheck, "自动检查更新", "启动一分钟后和之后每六小时看一次网盘（Flow 每次构建都会传上去），有新版本时侧栏「设置」上显示「新」")}
+      </div>
+      <div class="section">
         <h3>数据</h3>
         <div class="setting">
           <span class="label"><strong>数据目录</strong><small class="path">${esc(info.dataDir)}</small></span>
           <button data-act="open-data-dir">打开</button>
         </div>
-        <div class="muted"><small>素材、任务、设置都在 data.json 里；chrome-profile 是自动化浏览器的登录信息。版本 ${esc(info.version || "开发版")}</small></div>
+        <div class="muted"><small>素材、任务、设置都在 data.json 里；chrome-profile 是自动化浏览器的登录信息。</small></div>
       </div>
     </div>`;
 }
+
+const mb = (n: number) => `${(n / 1048576).toFixed(1)} MB`;
+const when = (ms: number) => new Date(ms).toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });
+
+// updateRow is the version line of the settings: what the last check of
+// the cloud drive found, and the buttons to check and to update.
+function updateRow() {
+  const u = state.update;
+  const current = u?.current || state.settings?.version || "";
+  let note = "Flow 每次构建都会把新版本传到网盘";
+  if (u?.installing) note = `正在下载 ${u.latest}：${mb(u.done)}${u.size ? ` / ${mb(u.size)}` : ""}…`;
+  else if (u?.checking) note = "正在检查网盘…";
+  else if (u?.error) note = `<span class="err">${esc(u.error)}</span>`;
+  else if (u?.newer) note = `有新版本 ${esc(u.latest ?? "")}（${u.published ? `${when(u.published)} 发布，` : ""}${mb(u.size ?? 0)}）`;
+  else if (u?.checked) note = `已是最新（网盘最新 ${esc(u.latest ?? "")}，${when(u.checked)} 检查）`;
+  const busy = u?.checking || u?.installing;
+  return `<span class="label"><strong>版本 ${esc(current || "开发版")}</strong><small>${note}</small></span>
+    <span class="row-buttons"><button data-act="check-update" ${busy ? "disabled" : ""}>检查更新</button>${
+      u?.newer ? `<button class="primary" data-act="install-update" ${busy ? "disabled" : ""}>${u.installing ? "正在更新…" : `更新到 ${esc(u.latest ?? "")}`}</button>` : ""
+    }</span>`;
+}
+
+// Only the version line is drawn again: the settings' text boxes keep what
+// is being typed.
+events.updateChanged.on((u) => {
+  state.update = u;
+  renderBadge();
+  const row = document.getElementById("update-row");
+  if (row) row.innerHTML = updateRow();
+});
 
 async function saveSettings(change: (s: SettingsInfo) => void) {
   const next = structuredClone(state.settings!);
@@ -949,6 +986,7 @@ view.addEventListener("change", (e) => {
     else if (id === "closeBrowser") s.settings.keepBrowser = !cb.checked;
     else if (id === "original") s.settings.original = cb.checked;
     else if (id === "autoSync") s.settings.autoSync = cb.checked;
+    else if (id === "updateCheck") s.settings.noUpdateCheck = !cb.checked;
   });
 });
 
@@ -1101,6 +1139,14 @@ view.addEventListener("click", async (e) => {
       return toast("已复制，粘贴到 Chrome 地址栏打开");
     case "open-data-dir":
       return void attempt(() => Settings.openDataDir());
+    case "check-update":
+      return void Updates.check().catch(() => {}); // the row shows the error
+    case "install-update": {
+      const u = state.update;
+      const how = u?.portable ? "覆盖当前文件夹里的程序" : "静默运行新安装包";
+      if (!u || !confirm(`下载 ${u.latest}（${mb(u.size ?? 0)}）后 Publisher 会退出，${how}，装好后自动重新打开。现在更新？`)) return;
+      return void attempt(() => Updates.install());
+    }
     case "check-all":
       return checkAll();
     case "login-all":
@@ -1133,5 +1179,6 @@ view.addEventListener("click", async (e) => {
   Library.folders(),
   Settings.get(),
 ]);
+state.update = await Updates.state();
 applyTheme(state.settings.settings.theme);
 setView("library");

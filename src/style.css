@@ -229,6 +229,8 @@ input.num { width: 72px; border: 1px solid var(--line); background: var(--panel)
 .setting .label small { color: var(--muted); }
 .setting input[type="checkbox"] { width: 18px; height: 18px; accent-color: var(--accent); cursor: pointer; flex: none; }
 .setting input.setting-text { width: 220px; flex: none; }
+.setting .row-buttons { display: flex; gap: 8px; flex: none; }
+.setting .err { color: var(--bad); }
 .segmented { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; padding: 2px; background: var(--panel-2); flex: none; }
 .segmented button { border: none; background: transparent; padding: 4px 14px; border-radius: 6px; color: var(--muted); }
 .segmented button.active { background: var(--panel); color: var(--text); font-weight: 600; box-shadow: 0 1px 3px rgb(0 0 0 / 0.12); }

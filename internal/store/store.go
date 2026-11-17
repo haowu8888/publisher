@@ -157,6 +157,8 @@ type Settings struct {
 	// AutoSync has the schedule add the new files of the sync folders
 	// before each of its runs.
 	AutoSync bool `json:"autoSync,omitempty"`
+	// NoUpdateCheck stops the app looking for a newer build by itself.
+	NoUpdateCheck bool `json:"noUpdateCheck,omitempty"`
 }
 
 // NoCollection, as a material's collection, keeps it out of the default
