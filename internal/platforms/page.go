@@ -416,7 +416,7 @@ func waitPublished(ctx context.Context, page *rod.Page, urlMarks []string, text 
 func waitPublishedFor(ctx context.Context, page *rod.Page, urlMarks []string, text string, wait time.Duration) error {
 	re := regexp.MustCompile(text)
 	said := false
-	if res, err := page.Timeout(evalTimeout).Eval(`() => document.body.innerText`); err == nil {
+	if res, err := page.Timeout(evalTimeout).Eval(bodyText); err == nil {
 		said = loginLost.MatchString(res.Value.Str())
 	}
 	for deadline := time.Now().Add(wait); ; {
@@ -427,7 +427,7 @@ func waitPublishedFor(ctx context.Context, page *rod.Page, urlMarks []string, te
 				}
 			}
 		}
-		if res, err := page.Timeout(evalTimeout).Eval(`() => document.body.innerText`); err == nil {
+		if res, err := page.Timeout(evalTimeout).Eval(bodyText); err == nil {
 			body := res.Value.Str()
 			if re.MatchString(body) {
 				return nil
@@ -448,12 +448,17 @@ func waitPublishedFor(ctx context.Context, page *rod.Page, urlMarks []string, te
 	}
 }
 
+// bodyText is a script returning the text a page shows, with that of
+// WeChat Channels' form, which is in a shadow root (see chRoot).
+const bodyText = `() => document.body.innerText + "\n" + (` + chRoot + `?.querySelector("body")?.innerText ?? "")`
+
 // pageNotes returns the text of the messages and dialogs a page shows, as
 // what it said to a submit that did not go through.
 func pageNotes(page *rod.Page) string {
 	res, err := page.Timeout(evalTimeout).Eval(`() => {
 		const sel = '[class*="toast"], [class*="message"], [class*="Message"], [class*="dialog"], [class*="modal"], [class*="tips"], [role="alert"], [role="dialog"]';
-		const texts = [...document.querySelectorAll(sel)]
+		const roots = [document, ` + chRoot + `].filter(Boolean);
+		const texts = roots.flatMap((r) => [...r.querySelectorAll(sel)])
 			.filter((e) => e.getClientRects().length > 0)
 			.map((e) => e.innerText.trim().replace(/\s+/g, " "))
 			.filter((t) => t && t.length < 200);

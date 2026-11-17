@@ -115,6 +115,7 @@ var (
 	douyinLimits   = Limits{Title: 30, Text: 1000, Tags: 5}
 	kuaishouLimits = Limits{Text: 500, Tags: 4}
 	xhsLimits      = Limits{Title: 20, Text: 1000, Tags: 10}
+	channelsLimits = Limits{Text: 1000, Tags: 10}
 	mpLimits       = Limits{Title: 64}
 	mpImageLimits  = Limits{Title: 20, Text: 1000}
 )
@@ -168,10 +169,21 @@ var All = []*Platform{
 		Collections:   true,
 	},
 	{
+		ID: "weixin-channels", Name: "视频号", Kinds: video,
+		HomeURL:       "https://channels.weixin.qq.com/platform",
+		LoginMark:     "login",
+		CookieDomains: []string{"channels.weixin.qq.com"},
+		Publish:       publishWeixinChannels,
+		Limits:        map[string]Limits{"video": channelsLimits},
+		Collections:   true,
+	},
+	{
 		ID: "weixin-mp", Name: "公众号", Kinds: article,
-		HomeURL:       "https://mp.weixin.qq.com/",
-		LoggedInMark:  "token=",
-		CookieDomains: []string{"weixin.qq.com"},
+		HomeURL:      "https://mp.weixin.qq.com/",
+		LoggedInMark: "token=",
+		// Its cookies are all on mp.weixin.qq.com; weixin.qq.com would
+		// take in Channels', and a login here would drop that one.
+		CookieDomains: []string{"mp.weixin.qq.com"},
 		Publish:       publishWeixinMP,
 		Limits:        map[string]Limits{"article": mpLimits, "images": mpImageLimits},
 		// Mass sending needs the admin's QR scan on the phone anyway.

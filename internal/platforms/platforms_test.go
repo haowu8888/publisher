@@ -29,3 +29,17 @@ func TestFitText(t *testing.T) {
 		t.Errorf("got %q, want %q", got, want)
 	}
 }
+
+func TestShortTitle(t *testing.T) {
+	for _, c := range []struct{ in, want string }{
+		{"AI 测试，标题!@ 短", "AI 测试 标题 短"},
+		{"Claude Code：Anthropic 的 AI 编程工具", "Claude Code"},
+		{"《三体》里的 AI？", "《三体》里的 AI？"},
+		{"你好，AI", ""},
+		{"一二三四五六七八九十一二三四五六七八九十", "一二三四五六七八九十一二三四五六"},
+	} {
+		if got := shortTitle(c.in); got != c.want {
+			t.Errorf("shortTitle(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}

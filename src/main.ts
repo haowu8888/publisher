@@ -454,7 +454,7 @@ function showLimits(m: Material) {
     "",
   );
 
-  // Kuaishou has no title: it goes before the text. Topics follow it.
+  // Kuaishou and Channels have no title: it goes before the text. Topics follow it.
   const texted = targets
     .filter((t) => t.l.text > 0)
     .map((t) => {

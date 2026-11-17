@@ -4,7 +4,8 @@
 //
 //	go run ./.dev/inspect <url or tab URL substring> <base64 js> [screenshot.png]
 //
-// A script "upload:<selector>|<file>" instead sets a file input's files,
+// A script "upload:<selector>|<file>" instead sets a file input's files
+// ("<host> >>> <selector>" for one in a shadow root),
 // "shadow:<selector>" prints the element's shadow root, closed or not, and
 // "cookies:<name,...>" prints the profile's cookies of those names, and
 // "close" closes the tab and "shadowclick:<host>|<selector>" clicks an
@@ -81,7 +82,15 @@ func main() {
 			// Several files go as "a;b", and "a;b|<js>" then prints <js>
 			// every half second for 15 seconds, to watch the upload.
 			files, watch, _ := strings.Cut(file, "|")
-			page.MustElement(sel).MustSetFiles(strings.Split(files, ";")...)
+			// "<host> >>> <selector>" finds the input in the host's shadow
+			// root, as WeChat Channels' form in wujie-app.
+			var el *rod.Element
+			if host, inner, ok := strings.Cut(sel, " >>> "); ok {
+				el = page.MustElement(host).MustShadowRoot().MustElement(inner)
+			} else {
+				el = page.MustElement(sel)
+			}
+			el.MustSetFiles(strings.Split(files, ";")...)
 			fmt.Println("uploaded", files)
 			for i := 0; watch != "" && i < 30; i++ {
 				fmt.Println(page.MustEval(`() => (` + watch + `)`).String())
