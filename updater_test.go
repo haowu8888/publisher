@@ -94,6 +94,21 @@ func TestListShare(t *testing.T) {
 	}
 }
 
+func TestSecureLink(t *testing.T) {
+	defer func(s string) { updateServer = s }(updateServer)
+	updateServer = "https://drive.example"
+	for link, want := range map[string]string{
+		"http://drive.example/api/v4/file/content/1/a.exe?sign=x": "https://drive.example/api/v4/file/content/1/a.exe?sign=x",
+		"https://cdn.example/a.exe":                               "https://cdn.example/a.exe",
+		"http://cdn.example/a.exe":                                "",
+	} {
+		got, err := secureLink(link)
+		if want == "" && err == nil || want != "" && got != want {
+			t.Errorf("secureLink(%q) = %q, %v; want %q", link, got, err, want)
+		}
+	}
+}
+
 func TestUnzip(t *testing.T) {
 	dir := t.TempDir()
 	file := filepath.Join(dir, "a.zip")

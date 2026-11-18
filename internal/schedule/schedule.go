@@ -200,14 +200,21 @@ func (x *Scheduler) publish(m store.Material, sc store.Schedule, now time.Time) 
 	ids := Targets(sc, m)
 	// Baijiahao takes the statement too, though without one it publishes.
 	if m.Statement == "" && (slices.Contains(ids, "bilibili") || slices.Contains(ids, "baijiahao")) {
-		m.Statement = sc.Statement
-		if err := x.store.PutMaterial(m); err != nil {
+		if _, err := x.store.UpdateMaterial(m.ID, func(m *store.Material) error {
+			if m.Statement == "" {
+				m.Statement = sc.Statement
+			}
+			return nil
+		}); err != nil {
 			return err
 		}
 	}
 	if _, err := x.queue.Add(m.ID, ids, store.ModeAuto); err != nil {
 		return err
 	}
-	m.ScheduledAt = now
-	return x.store.PutMaterial(m)
+	_, err := x.store.UpdateMaterial(m.ID, func(m *store.Material) error {
+		m.ScheduledAt = now
+		return nil
+	})
+	return err
 }

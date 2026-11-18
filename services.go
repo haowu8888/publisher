@@ -99,10 +99,14 @@ func (l *Library) ImportPaths(paths []string) ([]store.Material, error) {
 		if !ok {
 			continue
 		}
-		if err := l.store.PutMaterial(m); err != nil {
+		ms, err := l.store.AddMaterials(m)
+		if err != nil {
 			return added, err
 		}
-		added = append(added, m)
+		if len(ms) == 0 {
+			had = append(had, filepath.Base(p))
+		}
+		added = append(added, ms...)
 	}
 	if len(added) == 0 && len(had) > 0 {
 		return added, fmt.Errorf("已经在素材库里，没有重复导入：%s", strings.Join(had, "、"))
@@ -198,7 +202,7 @@ func (l *Library) sync(quiet time.Duration) ([]store.Material, error) {
 		}
 		return added, nil
 	}
-	return added, l.store.AddMaterials(added...)
+	return l.store.AddMaterials(added...)
 }
 
 // fresh reports whether the file at p, or one that goes with it, changed
@@ -253,21 +257,19 @@ func (l *Library) newFiles(dir string, quiet time.Duration) ([]string, error) {
 
 // Update saves edits to a material's title, description, tags or body.
 func (l *Library) Update(m store.Material) (store.Material, error) {
-	old, err := l.store.Material(m.ID)
-	if err != nil {
-		return store.Material{}, err
-	}
-	old.Title = strings.TrimSpace(m.Title)
-	old.Description = m.Description
-	old.Body = m.Body
-	old.Tags = cleanTags(m.Tags)
-	old.Statement = m.Statement
 	if m.WeixinType != "" && m.WeixinType != "images" {
 		return store.Material{}, fmt.Errorf("未知的公众号发布形式 %q", m.WeixinType)
 	}
-	old.WeixinType = m.WeixinType
-	old.Collections = cleanCollections(m.Collections)
-	return old, l.store.PutMaterial(old)
+	return l.store.UpdateMaterial(m.ID, func(old *store.Material) error {
+		old.Title = strings.TrimSpace(m.Title)
+		old.Description = m.Description
+		old.Body = m.Body
+		old.Tags = cleanTags(m.Tags)
+		old.Statement = m.Statement
+		old.WeixinType = m.WeixinType
+		old.Collections = cleanCollections(m.Collections)
+		return nil
+	})
 }
 
 // cleanCollections trims collection names and drops the empty ones, which
@@ -307,26 +309,27 @@ func (l *Library) PickImages(ctx context.Context, id string) (store.Material, er
 		}
 		return 1
 	})
-	// A cover taken from the old pictures, or gone, follows the new ones.
-	if _, err := os.Stat(m.CoverPath); m.CoverPath == "" || err != nil || slices.Contains(m.Images, m.CoverPath) {
-		m.CoverPath = paths[0]
-		if i := slices.IndexFunc(paths, func(p string) bool { return strings.EqualFold(baseName(p), "cover") }); i >= 0 {
-			m.CoverPath = paths[i]
-			paths = slices.Delete(paths, i, i+1)
+	return l.store.UpdateMaterial(id, func(m *store.Material) error {
+		// A cover taken from the old pictures, or gone, follows the new
+		// ones.
+		if _, err := os.Stat(m.CoverPath); m.CoverPath == "" || err != nil || slices.Contains(m.Images, m.CoverPath) {
+			m.CoverPath = paths[0]
+			if i := slices.IndexFunc(paths, func(p string) bool { return strings.EqualFold(baseName(p), "cover") }); i >= 0 {
+				m.CoverPath = paths[i]
+				paths = slices.Delete(paths, i, i+1)
+			}
 		}
-	}
-	m.Images = paths
-	return m, l.store.PutMaterial(m)
+		m.Images = paths
+		return nil
+	})
 }
 
 // ClearImages removes an article's pictures.
 func (l *Library) ClearImages(id string) (store.Material, error) {
-	m, err := l.store.Material(id)
-	if err != nil {
-		return m, err
-	}
-	m.Images = nil
-	return m, l.store.PutMaterial(m)
+	return l.store.UpdateMaterial(id, func(m *store.Material) error {
+		m.Images = nil
+		return nil
+	})
 }
 
 // PickCover asks for a cover image for a material. An empty result keeps
@@ -344,18 +347,18 @@ func (l *Library) PickCover(ctx context.Context, id string) (store.Material, err
 	if err != nil || len(paths) == 0 {
 		return m, err
 	}
-	m.CoverPath = paths[0]
-	return m, l.store.PutMaterial(m)
+	return l.store.UpdateMaterial(id, func(m *store.Material) error {
+		m.CoverPath = paths[0]
+		return nil
+	})
 }
 
 // ClearCover removes a material's cover.
 func (l *Library) ClearCover(id string) (store.Material, error) {
-	m, err := l.store.Material(id)
-	if err != nil {
-		return m, err
-	}
-	m.CoverPath = ""
-	return m, l.store.PutMaterial(m)
+	return l.store.UpdateMaterial(id, func(m *store.Material) error {
+		m.CoverPath = ""
+		return nil
+	})
 }
 
 // Reveal shows a material's file in the file manager.

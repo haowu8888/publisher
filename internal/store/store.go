@@ -369,15 +369,46 @@ func (s *Store) PutMaterial(m Material) error {
 	return s.save()
 }
 
-// AddMaterials adds new materials in order, so the last is the newest.
-func (s *Store) AddMaterials(ms ...Material) error {
+// AddMaterials adds new materials in order, so the last is the newest, and
+// returns those it added. One of a file the library already has is left
+// out: two imports at once, as the user's sync and the schedule's, would
+// otherwise both add it, and it would be published twice.
+func (s *Store) AddMaterials(ms ...Material) ([]Material, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	added := []Material{}
 	for _, m := range ms {
+		if (m.VideoPath != "" && s.hasFile(m.VideoPath)) || (m.ArticlePath != "" && s.hasFile(m.ArticlePath)) {
+			continue
+		}
 		s.d.Materials = slices.Insert(s.d.Materials, 0, m)
 		s.markImported(m)
+		added = append(added, m)
 	}
-	return s.save()
+	if len(added) == 0 {
+		return added, nil
+	}
+	return added, s.save()
+}
+
+// UpdateMaterial applies fn to the material with id and returns the
+// result, all under the lock: a material read, changed and put back whole
+// would undo what the schedule or the user changed meanwhile. Published is
+// the store's to keep and stays as it was.
+func (s *Store) UpdateMaterial(id string, fn func(*Material) error) (Material, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	i := slices.IndexFunc(s.d.Materials, func(m Material) bool { return m.ID == id })
+	if i < 0 {
+		return Material{}, ErrNotFound
+	}
+	m := s.d.Materials[i]
+	if err := fn(&m); err != nil {
+		return s.d.Materials[i], err
+	}
+	m.Published = s.d.Materials[i].Published
+	s.d.Materials[i] = m
+	return m, s.save()
 }
 
 // HasFile reports whether a material in the library is of the file at
@@ -385,6 +416,10 @@ func (s *Store) AddMaterials(ms ...Material) error {
 func (s *Store) HasFile(path string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.hasFile(path)
+}
+
+func (s *Store) hasFile(path string) bool {
 	k := fileKey(path)
 	return slices.ContainsFunc(s.d.Materials, func(m Material) bool {
 		return (m.VideoPath != "" && fileKey(m.VideoPath) == k) || (m.ArticlePath != "" && fileKey(m.ArticlePath) == k)

@@ -61,7 +61,7 @@ func TestDeleteForgetsUnpublished(t *testing.T) {
 	}
 	draft := Material{ID: "a", Kind: KindArticle, ArticlePath: "D:/a/草稿.md"}
 	sent := Material{ID: "b", Kind: KindVideo, VideoPath: "D:/a/ep1.mp4", Published: map[string]time.Time{"douyin": time.Now()}}
-	if err := s.AddMaterials(draft, sent); err != nil {
+	if _, err := s.AddMaterials(draft, sent); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.DeleteMaterials("a", "b"); err != nil {
@@ -98,6 +98,44 @@ func TestOpenSplitsOldSchedule(t *testing.T) {
 	}
 }
 
+// TestAddMaterialsOnce adds a file's material once, as when two syncs
+// overlap, and UpdateMaterial changes a material without undoing what
+// else changed it.
+func TestAddMaterialsOnce(t *testing.T) {
+	s, err := Open(filepath.Join(t.TempDir(), "data.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if added, err := s.AddMaterials(Material{ID: "a", VideoPath: "D:/a/ep1.mp4"}); err != nil || len(added) != 1 {
+		t.Fatalf("first add: %v %v", added, err)
+	}
+	added, err := s.AddMaterials(Material{ID: "b", VideoPath: `d:\a\EP1.mp4`}, Material{ID: "c", ArticlePath: "D:/a/x.md"})
+	if err != nil || len(added) != 1 || added[0].ID != "c" || len(s.Materials()) != 2 {
+		t.Fatalf("second add: %v %v, %d materials", added, err, len(s.Materials()))
+	}
+	s.AddTask(Task{ID: "t", MaterialID: "a", Platform: "douyin"})
+	s.UpdateTask("t", func(t *Task) { t.Status = StatusSuccess })
+	m, err := s.UpdateMaterial("a", func(m *Material) error {
+		m.Title, m.Published = "新标题", nil
+		return nil
+	})
+	if err != nil || m.Title != "新标题" || m.Published["douyin"].IsZero() {
+		t.Errorf("UpdateMaterial: %+v %v", m, err)
+	}
+	if _, err := s.UpdateMaterial("a", func(m *Material) error {
+		m.Title = "不要"
+		return ErrBusy
+	}); err != ErrBusy {
+		t.Errorf("fn's error: %v", err)
+	}
+	if m, _ := s.Material("a"); m.Title != "新标题" {
+		t.Errorf("a failed update was kept: %q", m.Title)
+	}
+	if _, err := s.UpdateMaterial("x", func(*Material) error { return nil }); err != ErrNotFound {
+		t.Errorf("unknown id: %v", err)
+	}
+}
+
 // TestBusyAndWaitingTasksStay keeps a material with a task queued, and
 // keeps the task waiting for the user's submit when the others are cleared.
 func TestBusyAndWaitingTasksStay(t *testing.T) {
@@ -105,7 +143,7 @@ func TestBusyAndWaitingTasksStay(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.AddMaterials(Material{ID: "a", VideoPath: "D:/a/ep1.mp4"}, Material{ID: "b", VideoPath: "D:/a/ep2.mp4"}); err != nil {
+	if _, err := s.AddMaterials(Material{ID: "a", VideoPath: "D:/a/ep1.mp4"}, Material{ID: "b", VideoPath: "D:/a/ep2.mp4"}); err != nil {
 		t.Fatal(err)
 	}
 	if !s.HasFile(`d:\a\EP1.mp4`) || s.HasFile("D:/a/ep3.mp4") || s.HasFile("") {

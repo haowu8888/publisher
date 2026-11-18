@@ -27,9 +27,10 @@ import (
 
 // Every run of the Flow pipeline publisher uploads the new installer and
 // portable zip to this share of Cloudreve, replacing the last ones; their
-// names carry the version (0.1.<run>).
+// names carry the version (0.1.<run>). The server is https since
+// 2026-11-18: http answers 301, which turns the API's POSTs into GETs.
 var (
-	updateServer = "http://cloudreve.haowu.fun"
+	updateServer = "https://cloudreve.haowu.fun"
 	updateShare  = "19I6"
 
 	setupName    = regexp.MustCompile(`(?i)^publisher-(\d+(?:\.\d+)*)-setup\.exe$`)
@@ -308,7 +309,28 @@ func downloadURL(path string) (string, error) {
 	if len(data.URLs) == 0 || data.URLs[0].URL == "" {
 		return "", errors.New("网盘没有给出下载地址")
 	}
-	return data.URLs[0].URL, nil
+	return secureLink(data.URLs[0].URL)
+}
+
+// secureLink puts a download link of the update server on the API's
+// scheme: Cloudreve hands out http links, and nothing but the connection
+// vouches for the installer that is run. Another host's link must be
+// https already when the server is.
+func secureLink(link string) (string, error) {
+	u, err := url.Parse(link)
+	if err != nil {
+		return "", err
+	}
+	server, err := url.Parse(updateServer)
+	if err != nil {
+		return "", err
+	}
+	if u.Host == server.Host {
+		u.Scheme = server.Scheme
+	} else if server.Scheme == "https" && u.Scheme != "https" {
+		return "", fmt.Errorf("网盘给出的下载地址不安全：%s", link)
+	}
+	return u.String(), nil
 }
 
 // cloudreve calls the API of Cloudreve v4, anonymous: the share is public.
