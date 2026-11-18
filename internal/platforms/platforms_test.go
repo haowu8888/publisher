@@ -1,6 +1,10 @@
 package platforms
 
-import "testing"
+import (
+	"testing"
+
+	"publisher/internal/store"
+)
 
 func TestFitTitle(t *testing.T) {
 	for _, c := range []struct {
@@ -40,6 +44,31 @@ func TestShortTitle(t *testing.T) {
 	} {
 		if got := shortTitle(c.in); got != c.want {
 			t.Errorf("shortTitle(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
+// TestCheckDayu refuses, ahead of the form, the articles Dayu would turn
+// down when submitted by themselves.
+func TestCheckDayu(t *testing.T) {
+	art := func(title, body, cover string) store.Material {
+		return store.Material{Kind: store.KindArticle, Title: title, Body: body, CoverPath: cover}
+	}
+	for _, c := range []struct {
+		name string
+		m    store.Material
+		mode store.Mode
+		ok   bool
+	}{
+		{"cover", art("一个够长的标题", "正文", `C:\a.png`), store.ModeAuto, true},
+		{"picture in body", art("一个够长的标题", "![](https://example.com/a.png)", ""), store.ModeAuto, true},
+		{"no picture", art("一个够长的标题", "正文", ""), store.ModeAuto, false},
+		{"short title", art("短标题", "正文", `C:\a.png`), store.ModeAuto, false},
+		{"review", art("短", "正文", ""), store.ModeReview, true},
+		{"video", store.Material{Kind: store.KindVideo, Title: "短"}, store.ModeAuto, true},
+	} {
+		if err := checkDayu(c.m, c.mode); (err == nil) != c.ok {
+			t.Errorf("%s: checkDayu = %v, want ok %v", c.name, err, c.ok)
 		}
 	}
 }

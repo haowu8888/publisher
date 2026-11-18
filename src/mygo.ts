@@ -155,6 +155,7 @@ export interface Task {
   status: Status;
   step: string;
   error?: string;
+  shot?: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -354,6 +355,13 @@ export const Publisher = {
   /** MarkDone records that the user submitted a reviewed task themselves. */
   markDone(id: string): Promise<void> {
     return call("Publisher.MarkDone", id);
+  },
+  /**
+   * OpenShot opens the screenshot of a failed task's page in the system's
+   * image viewer.
+   */
+  openShot(id: string): Promise<void> {
+    return call("Publisher.OpenShot", id);
   },
   /**
    * Publish queues a material for each platform. Mode "review" fills the

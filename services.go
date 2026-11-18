@@ -619,11 +619,29 @@ func (p *Publisher) MarkDone(id string) error {
 
 // Delete removes a task that is not queued or running. A material it
 // published stays marked as published.
-func (p *Publisher) Delete(id string) error { return p.store.DeleteTask(id) }
+func (p *Publisher) Delete(id string) error {
+	err := p.store.DeleteTask(id)
+	p.queue.PruneShots()
+	return err
+}
 
 // ClearFinished removes tasks that are over, but for those waiting for
 // the user to submit them; materials stay marked as published.
-func (p *Publisher) ClearFinished() error { return p.store.ClearFinishedTasks() }
+func (p *Publisher) ClearFinished() error {
+	err := p.store.ClearFinishedTasks()
+	p.queue.PruneShots()
+	return err
+}
+
+// OpenShot opens the screenshot of a failed task's page in the system's
+// image viewer.
+func (p *Publisher) OpenShot(id string) error {
+	path := p.queue.ShotPath(id)
+	if _, err := os.Stat(path); err != nil {
+		return errors.New("截图已不存在")
+	}
+	return mygo.Shell.OpenPath(path)
+}
 
 func baseName(p string) string {
 	return strings.TrimSuffix(filepath.Base(p), filepath.Ext(p))

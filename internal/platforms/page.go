@@ -307,6 +307,46 @@ func clickVisible(ctx context.Context, page *rod.Page, sel, text string, wait ti
 	}
 }
 
+// mouseClick is clickVisible with a real mouse click, for buttons that a
+// script's click() does nothing to, such as Dayu's, which listen for
+// mousedown.
+func mouseClick(ctx context.Context, page *rod.Page, sel, text string, wait time.Duration) error {
+	for deadline := time.Now().Add(wait); ; {
+		el, err := page.Sleeper(rod.NotFoundSleeper).Timeout(evalTimeout).ElementByJS(rod.Eval(`(sel, text) => {
+			const re = new RegExp(text);
+			return [...document.querySelectorAll(sel)].find((e) => e.getClientRects().length && re.test(e.textContent.trim())) ?? null;
+		}`, sel, text))
+		if err == nil {
+			return el.CancelTimeout().Sleeper(rod.DefaultSleeper).Timeout(evalTimeout).Click("left", 1)
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("未找到「%s」按钮", strings.Trim(text, "^$"))
+		}
+		if err := sleep(ctx, 500*time.Millisecond); err != nil {
+			return err
+		}
+	}
+}
+
+// clickUntilGone clicks the visible element matching sel and text every
+// interval until there is none, failing after wait. It is for buttons a
+// page ignores at first with no sign of when it will take them, such as a
+// cropper's 确定 before it has drawn the picture, and that go away once
+// taken.
+func clickUntilGone(ctx context.Context, page *rod.Page, sel, text string, interval, wait time.Duration) error {
+	for deadline := time.Now().Add(wait); ; {
+		if err := sleep(ctx, interval); err != nil {
+			return err
+		}
+		if clickVisible(ctx, page, sel, text, 0) != nil {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("点「%s」没有反应", strings.Trim(text, "^$"))
+		}
+	}
+}
+
 // pickByName clicks the visible element matching sel whose label, the text
 // of labelSel inside it, is name, waiting up to wait for the choices to
 // load. what names the choices in the error, which lists those there are.
@@ -454,6 +494,7 @@ func waitPublished(ctx context.Context, page *rod.Page, urlMarks []string, text 
 // waitPublishedFor is waitPublished, waiting no longer than wait.
 func waitPublishedFor(ctx context.Context, page *rod.Page, urlMarks []string, text string, wait time.Duration) error {
 	re := regexp.MustCompile(text)
+	startNotes(page)
 	said := false
 	if res, err := page.Timeout(evalTimeout).Eval(bodyText); err == nil {
 		said = loginLost.MatchString(res.Value.Str())
@@ -476,6 +517,9 @@ func waitPublishedFor(ctx context.Context, page *rod.Page, urlMarks []string, te
 			}
 		}
 		if time.Now().After(deadline) {
+			if said := newNotes(page); said != "" {
+				return fmt.Errorf("提交后未看到成功提示，页面提示过：%s", said)
+			}
 			if said := pageNotes(page); said != "" {
 				return fmt.Errorf("提交后未看到成功提示，页面显示：%s", said)
 			}
@@ -490,6 +534,56 @@ func waitPublishedFor(ctx context.Context, page *rod.Page, urlMarks []string, te
 // bodyText is a script returning the text a page shows, with that of
 // WeChat Channels' form, which is in a shadow root (see chRoot).
 const bodyText = `() => document.body.innerText + "\n" + (` + chRoot + `?.querySelector("body")?.innerText ?? "")`
+
+// noteSel finds the elements that hold a page's messages and dialogs.
+const noteSel = `[class*="toast"], [class*="message"], [class*="Message"], [class*="notice"], [class*="dialog"], [class*="modal"], [class*="pop"], [class*="tip"], [class*="error"], [class*="alert"], [role="alert"], [role="dialog"]`
+
+// watchNotes starts recording, in window.__pubNotes, the messages and
+// dialogs a page shows from now on that were not on it already. A message
+// such as 「请选择信息来源」 is gone in seconds, long before a submit is
+// given up on, while the page's fixed hints stay: those would be all that
+// pageNotes found then. One started already, before a submit's click,
+// keeps going.
+const watchNotes = `() => {
+	if (window.__pubNotes) return;
+	const norm = (t) => (t || "").trim().replace(/\s+/g, " ");
+	const roots = [document, ` + chRoot + `].filter(Boolean);
+	const base = norm((` + bodyText + `)());
+	const notes = [];
+	let queued = false;
+	const grab = () => {
+		queued = false;
+		for (const r of roots) for (const e of r.querySelectorAll(` + "`" + noteSel + "`" + `)) {
+			if (!e.getClientRects().length) continue;
+			const t = norm(e.innerText);
+			if (t && t.length < 200 && !base.includes(t) && !notes.includes(t) && notes.length < 50) notes.push(t);
+		}
+	};
+	const ob = new MutationObserver(() => {
+		if (!queued) { queued = true; setTimeout(grab, 100); }
+	});
+	for (const r of roots) ob.observe(r, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ["class", "style"] });
+	window.__pubNotes = { ob, notes };
+}`
+
+// startNotes runs watchNotes. waitPublished does, but a submit that may
+// first be refused, or asks to confirm before waitPublished, should call it
+// before its click.
+func startNotes(page *rod.Page) { page.Timeout(evalTimeout).Eval(watchNotes) }
+
+// newNotes returns what watchNotes recorded, but for texts that are part
+// of a longer one and for Dayu's notice, which comes and goes on its own,
+// that the browser is zoomed (by the display scaling).
+func newNotes(page *rod.Page) string {
+	res, err := page.Timeout(evalTimeout).Eval(`() => {
+		const all = window.__pubNotes?.notes || [];
+		return all.filter((t) => !all.some((o) => o !== t && o.includes(t)) && !/浏览器处于放大状态/.test(t)).slice(0, 4).join("；");
+	}`)
+	if err != nil {
+		return ""
+	}
+	return res.Value.Str()
+}
 
 // pageNotes returns the text of the messages and dialogs a page shows, as
 // what it said to a submit that did not go through.
@@ -638,6 +732,12 @@ func bodyImages(m store.Material) []string {
 		}
 	}
 	return out
+}
+
+// hasPicture reports whether an article shows a picture: its cover, or one
+// in its body.
+func hasPicture(m store.Material) bool {
+	return m.CoverPath != "" || len(bodyImages(m)) > 0 || strings.Contains(markdownHTML(articleBody(m)), "<img")
 }
 
 // noteImages returns the pictures of an image post: the cover first, then

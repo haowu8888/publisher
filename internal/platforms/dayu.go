@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"publisher/internal/browser"
 	"publisher/internal/store"
@@ -272,28 +273,18 @@ func dayuSave(ctx context.Context, page *rod.Page) error {
 	if _, err := page.Timeout(30 * time.Second).ElementByJS(rod.Eval(`(sel) => [...document.querySelectorAll(sel)].find((b) => b.offsetParent && b.textContent.trim() === "保存") ?? null`, save)); err != nil {
 		return errors.New("封面裁剪框没出来")
 	}
-	for deadline := time.Now().Add(time.Minute); ; {
-		if err := sleep(ctx, 3*time.Second); err != nil {
-			return err
-		}
-		if clickVisible(ctx, page, save, "^保存$", 0) != nil {
-			return nil
-		}
-		if time.Now().After(deadline) {
-			return errors.New("封面裁剪框点「保存」没有反应")
-		}
+	if err := clickUntilGone(ctx, page, save, "^保存$", 3*time.Second, time.Minute); err != nil {
+		return fmt.Errorf("封面裁剪框%w", err)
 	}
+	return nil
 }
 
 // dayuSubmit publishes the filled form (发表).
 func dayuSubmit(ctx context.Context, page *rod.Page, j Job, note string) error {
 	j.Report("提交发表")
-	// 发表 listens for mousedown, which a script's click() does not send.
-	btn, err := findR(page, "button.w-btn_primary", "^发表$", 10*time.Second)
-	if err != nil {
-		return errors.New("未找到「发表」按钮")
-	}
-	if err := btn.Click("left", 1); err != nil {
+	startNotes(page)
+	// 发表 listens for mousedown.
+	if err := mouseClick(ctx, page, "button.w-btn_primary", "^发表$", 10*time.Second); err != nil {
 		return err
 	}
 	// 发表 may first ask to confirm, e.g. 「视频画质过低提醒」 for a low
@@ -306,10 +297,7 @@ func dayuSubmit(ctx context.Context, page *rod.Page, j Job, note string) error {
 		if res, err := page.Timeout(evalTimeout).Eval(`() => /发表成功|发布成功|提交成功/.test(document.body.innerText)`); err == nil && res.Value.Bool() {
 			break
 		}
-		if el, err := page.Sleeper(rod.NotFoundSleeper).Timeout(evalTimeout).ElementByJS(rod.Eval(`() => [...document.querySelectorAll(".widgets-pop button")]
-			.find((b) => b.getClientRects().length && /^(继续上传|继续发表|确认发表)$/.test(b.innerText.trim())) || null`)); err == nil {
-			el.CancelTimeout().Click("left", 1)
-		}
+		mouseClick(ctx, page, ".widgets-pop button", "^(继续上传|继续发表|确认发表)$", 0)
 		if err := sleep(ctx, time.Second); err != nil {
 			return err
 		}
@@ -363,7 +351,7 @@ func dayuArticle(ctx context.Context, b *browser.Browser, j Job) error {
 			return fmt.Errorf("设置封面失败: %w", err)
 		}
 	case j.Mode == store.ModeAuto:
-		return errors.New("大鱼号文章的封面只能从正文图片里选：素材没有封面，正文里也没有图片")
+		return errDayuNoCover
 	}
 	if err := dayuStatement(page, m.Statement); err != nil {
 		return err
@@ -386,6 +374,20 @@ func dayuBody(ctx context.Context, page *rod.Page, j Job, content string) (int, 
 		n++
 		return fmt.Sprintf("<p>〔图%d〕</p>", n)
 	})
+	// The editor exists a while before its document does, and setContent
+	// throws until then.
+	for deadline := time.Now().Add(30 * time.Second); ; {
+		res, err := page.Timeout(evalTimeout).Eval(`() => !!window.UE?.instants?.ueditorInstant0?.body`)
+		if err == nil && res.Value.Bool() {
+			break
+		}
+		if time.Now().After(deadline) {
+			return 0, errors.New("正文编辑器没有加载出来")
+		}
+		if err := sleep(ctx, 500*time.Millisecond); err != nil {
+			return 0, err
+		}
+	}
 	if _, err := page.Timeout(evalTimeout).Eval(`(html) => UE.instants.ueditorInstant0.setContent(html)`, marked); err != nil {
 		return 0, fmt.Errorf("未找到正文编辑器，发布页可能已改版: %w", err)
 	}
@@ -459,16 +461,8 @@ func dayuArticleCover(ctx context.Context, page *rod.Page) error {
 		return fmt.Errorf("选封面的对话框没出来: %w", err)
 	}
 	// 下一步 is ignored until the dialog has loaded the picture.
-	for deadline := time.Now().Add(30 * time.Second); ; {
-		if err := sleep(ctx, 2*time.Second); err != nil {
-			return err
-		}
-		if clickVisible(ctx, page, pop+` button`, `^下一步$`, 0) != nil {
-			break
-		}
-		if time.Now().After(deadline) {
-			return errors.New("选封面的对话框点「下一步」没有反应")
-		}
+	if err := clickUntilGone(ctx, page, pop+` button`, `^下一步$`, 2*time.Second, 30*time.Second); err != nil {
+		return fmt.Errorf("选封面的对话框%w", err)
 	}
 	if err := dayuSave(ctx, page); err != nil {
 		return err
@@ -485,4 +479,25 @@ func dayuArticleCover(ctx context.Context, page *rod.Page) error {
 			return err
 		}
 	}
+}
+
+var errDayuNoCover = errors.New("大鱼号文章的封面只能从正文图片里选：素材没有封面，正文里也没有图片")
+
+// dayuTitleMin is the fewest characters Dayu takes in an article's title.
+const dayuTitleMin = 5
+
+// checkDayu refuses, before the form is filled, an article to submit by
+// itself that Dayu would turn down: one without a picture for its cover,
+// or with too short a title. A review leaves those to the user.
+func checkDayu(m store.Material, mode store.Mode) error {
+	if m.Kind != store.KindArticle || mode != store.ModeAuto {
+		return nil
+	}
+	if n := utf8.RuneCountInString(strings.TrimSpace(m.Title)); n < dayuTitleMin {
+		return fmt.Errorf("大鱼号文章标题至少 %d 个字，「%s」只有 %d 个字", dayuTitleMin, m.Title, n)
+	}
+	if !hasPicture(m) {
+		return errDayuNoCover
+	}
+	return nil
 }

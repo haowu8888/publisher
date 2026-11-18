@@ -142,16 +142,11 @@ func bjhStatement(ctx context.Context, page *rod.Page, statement string) error {
 	if err := clickVisible(ctx, page, ".cheetah-modal-footer button", "^确定$", 5*time.Second); err != nil {
 		return err
 	}
-	// The dialog sometimes ignores 确定, so click it again until it closes.
-	for i := 0; ; i++ {
-		if waitGone(ctx, page, ".cheetah-modal-body", 5*time.Second) == nil {
-			return nil
-		}
-		if i == 4 {
-			return errors.New("创作声明对话框没有关闭")
-		}
-		clickVisible(ctx, page, ".cheetah-modal-footer button", "^确定$", 0)
+	// The dialog sometimes ignores 确定.
+	if err := clickUntilGone(ctx, page, ".cheetah-modal-footer button", "^确定$", 5*time.Second, 25*time.Second); err != nil {
+		return errors.New("创作声明对话框没有关闭")
 	}
+	return nil
 }
 
 // bjhUploaded waits until the video upload finishes: the page shows its
@@ -326,7 +321,7 @@ func bjhArticle(ctx context.Context, b *browser.Browser, j Job) error {
 			return fmt.Errorf("设置封面失败: %w", err)
 		}
 	case j.Mode == store.ModeAuto:
-		return errors.New("百家号文章必须有封面：素材没有封面，正文里也没有图片")
+		return errBjhNoCover
 	}
 	if j.Mode == store.ModeReview {
 		if m.CoverPath == "" && pics == 0 {
@@ -393,4 +388,15 @@ func bjhSubmit(ctx context.Context, page *rod.Page, j Job, note string) error {
 		return err
 	}
 	return finish(page, j, "发布成功"+note)
+}
+
+var errBjhNoCover = errors.New("百家号文章必须有封面：素材没有封面，正文里也没有图片")
+
+// checkBaijiahao refuses an article to submit by itself that has no
+// picture for the cover it requires, before the form is filled.
+func checkBaijiahao(m store.Material, mode store.Mode) error {
+	if m.Kind == store.KindArticle && mode == store.ModeAuto && !hasPicture(m) {
+		return errBjhNoCover
+	}
+	return nil
 }

@@ -98,13 +98,16 @@ type Task struct {
 	MaterialID string `json:"materialId"`
 	// Title and Kind are the material's, so the task still shows what it
 	// published once the material is deleted.
-	Title     string    `json:"title,omitempty"`
-	Kind      Kind      `json:"kind,omitempty"`
-	Platform  string    `json:"platform"`
-	Mode      Mode      `json:"mode"`
-	Status    Status    `json:"status"`
-	Step      string    `json:"step"`
-	Error     string    `json:"error,omitempty"`
+	Title    string `json:"title,omitempty"`
+	Kind     Kind   `json:"kind,omitempty"`
+	Platform string `json:"platform"`
+	Mode     Mode   `json:"mode"`
+	Status   Status `json:"status"`
+	Step     string `json:"step"`
+	Error    string `json:"error,omitempty"`
+	// Shot is set when the task failed and a screenshot of its page was
+	// saved, as <id>.jpg in the queue's shots folder.
+	Shot      bool      `json:"shot,omitempty"`
 	CreatedAt time.Time `json:"createdAt"`
 	UpdatedAt time.Time `json:"updatedAt"`
 }

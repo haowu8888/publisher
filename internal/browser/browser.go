@@ -24,6 +24,8 @@ type Browser struct {
 	mu sync.Mutex
 	b  *rod.Browser
 	l  *launcher.Launcher
+	// last is the tab Page opened last, which for a task is its form.
+	last *rod.Page
 }
 
 // New returns a Browser that keeps its profile in profileDir.
@@ -104,7 +106,27 @@ func (x *Browser) Page(url string) (*rod.Page, error) {
 	if err != nil {
 		return nil, err
 	}
-	return b.Page(proto.TargetCreateTarget{URL: url})
+	page, err := b.Page(proto.TargetCreateTarget{URL: url})
+	if err == nil {
+		x.mu.Lock()
+		x.last = page
+		x.mu.Unlock()
+	}
+	return page, err
+}
+
+// Last returns the tab Page opened last since ForgetLast, or nil.
+func (x *Browser) Last() *rod.Page {
+	x.mu.Lock()
+	defer x.mu.Unlock()
+	return x.last
+}
+
+// ForgetLast clears what Last returns.
+func (x *Browser) ForgetLast() {
+	x.mu.Lock()
+	x.last = nil
+	x.mu.Unlock()
 }
 
 // Cookies returns the cookies of all sites, or nil when the browser is not

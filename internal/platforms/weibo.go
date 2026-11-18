@@ -483,15 +483,8 @@ func wbArticleCover(ctx context.Context, page *rod.Page, path string) error {
 		return err
 	}
 	// The cropper may not take the first 确定 before it has drawn.
-	for deadline := time.Now().Add(40 * time.Second); ; {
-		if err := sleep(ctx, 3*time.Second); err != nil {
-			return err
-		}
-		if clickVisible(ctx, page, ".n-dialog button", "^确定$", 0) != nil {
-			return nil
-		}
-		if time.Now().After(deadline) {
-			return errors.New("封面裁剪框点「确定」没有反应")
-		}
+	if err := clickUntilGone(ctx, page, ".n-dialog button", "^确定$", 3*time.Second, 40*time.Second); err != nil {
+		return fmt.Errorf("封面裁剪框%w", err)
 	}
+	return nil
 }

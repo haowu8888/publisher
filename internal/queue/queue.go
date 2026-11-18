@@ -7,9 +7,12 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"slices"
 	"sync"
 	"time"
+
+	"github.com/go-rod/rod/lib/proto"
 
 	"publisher/internal/browser"
 	"publisher/internal/platforms"
@@ -22,6 +25,7 @@ const taskTimeout = time.Hour
 type Queue struct {
 	store    *store.Store
 	browser  *browser.Browser
+	shotDir  string
 	onUpdate func(store.Task)
 	// onLoggedOut is told of a platform whose task found its login gone.
 	onLoggedOut func(platformID string)
@@ -34,9 +38,10 @@ type Queue struct {
 }
 
 // New returns a queue that reports every task change to onUpdate, and a
-// platform whose task found its login gone to onLoggedOut.
-func New(s *store.Store, b *browser.Browser, onUpdate func(store.Task), onLoggedOut func(platformID string)) *Queue {
-	q := &Queue{store: s, browser: b, onUpdate: onUpdate, onLoggedOut: onLoggedOut, wake: make(chan struct{}, 1)}
+// platform whose task found its login gone to onLoggedOut. A failed task's
+// page is saved to shotDir as a screenshot.
+func New(s *store.Store, b *browser.Browser, shotDir string, onUpdate func(store.Task), onLoggedOut func(platformID string)) *Queue {
+	q := &Queue{store: s, browser: b, shotDir: shotDir, onUpdate: onUpdate, onLoggedOut: onLoggedOut, wake: make(chan struct{}, 1)}
 	go q.loop()
 	return q
 }
@@ -90,12 +95,13 @@ func (q *Queue) Retry(id string) error {
 	}
 	t, err := q.store.UpdateTask(id, func(t *store.Task) {
 		if t.Status != store.StatusRunning {
-			t.Status, t.Step, t.Error = store.StatusPending, "排队中", ""
+			t.Status, t.Step, t.Error, t.Shot = store.StatusPending, "排队中", "", false
 		}
 	})
 	if err != nil {
 		return err
 	}
+	os.Remove(q.ShotPath(id))
 	q.onUpdate(t)
 	q.poke()
 	return nil
@@ -185,10 +191,12 @@ func (q *Queue) run(t store.Task) (failed bool) {
 	}()
 
 	q.update(t.ID, func(t *store.Task) { t.Status, t.Step = store.StatusRunning, "准备中" })
+	q.browser.ForgetLast()
 	err := q.publish(ctx, t)
 	if errors.Is(err, platforms.ErrNotLoggedIn) {
 		q.onLoggedOut(t.Platform)
 	}
+	shot := err != nil && !errors.Is(err, context.Canceled) && q.screenshot(t.ID)
 	q.update(t.ID, func(t *store.Task) {
 		switch {
 		case errors.Is(err, context.Canceled):
@@ -203,8 +211,55 @@ func (q *Queue) run(t store.Task) (failed bool) {
 			t.Status = store.StatusSuccess
 		}
 		failed = t.Status == store.StatusFailed
+		t.Shot = failed && shot
 	})
 	return failed
+}
+
+// ShotPath is where the screenshot of task id's failed page goes.
+func (q *Queue) ShotPath(id string) string { return filepath.Join(q.shotDir, id+".jpg") }
+
+// screenshot saves the page the task opened last, which shows where it
+// failed even once the browser is closed, and reports whether it did.
+func (q *Queue) screenshot(id string) bool {
+	page := q.browser.Last()
+	if page == nil {
+		return false
+	}
+	page = page.Timeout(10 * time.Second)
+	// A background tab may not paint.
+	if _, err := page.Activate(); err != nil {
+		return false
+	}
+	quality := 70
+	img, err := page.Screenshot(false, &proto.PageCaptureScreenshot{Format: proto.PageCaptureScreenshotFormatJpeg, Quality: &quality})
+	if err != nil {
+		return false
+	}
+	if err := os.MkdirAll(q.shotDir, 0o755); err != nil {
+		return false
+	}
+	return os.WriteFile(q.ShotPath(id), img, 0o644) == nil
+}
+
+// PruneShots deletes the screenshots of tasks that are gone or no longer
+// failed with one.
+func (q *Queue) PruneShots() {
+	entries, err := os.ReadDir(q.shotDir)
+	if err != nil {
+		return
+	}
+	keep := map[string]bool{}
+	for _, t := range q.store.Tasks() {
+		if t.Shot {
+			keep[t.ID+".jpg"] = true
+		}
+	}
+	for _, e := range entries {
+		if !keep[e.Name()] {
+			os.Remove(filepath.Join(q.shotDir, e.Name()))
+		}
+	}
 }
 
 func (q *Queue) publish(ctx context.Context, t store.Task) error {

@@ -705,6 +705,7 @@ function taskActions(t: Task) {
   if (t.status === "running" || t.status === "pending") b.push(`<button data-cancel="${t.id}">取消</button>`);
   if (t.status === "review") b.push(`<button class="primary" data-done="${t.id}">我已提交</button>`);
   const gone = !state.materials.some((m) => m.id === t.materialId);
+  if (t.shot) b.push(`<button data-shot="${t.id}" title="失败时页面的样子">截图</button>`);
   if (!gone && (t.status === "failed" || t.status === "canceled" || t.status === "review"))
     b.push(`<button data-retry="${t.id}">重试</button>`);
   if (!busy(t)) b.push(`<button class="danger ghost" data-del-task="${t.id}">删除</button>`);
@@ -1190,6 +1191,7 @@ view.addEventListener("click", async (e) => {
   }
   if (d.cancel) return void attempt(() => Publisher.cancel(d.cancel!));
   if (d.retry) return void attempt(() => Publisher.retry(d.retry!));
+  if (d.shot) return void attempt(() => Publisher.openShot(d.shot!));
   if (d.done) return void attempt(() => Publisher.markDone(d.done!));
   if (d.delTask) {
     const waiting = state.tasks.find((t) => t.id === d.delTask)?.status === "review";

@@ -32,7 +32,7 @@ func main() {
 	b := browser.New(filepath.Join(dir, "chrome-profile"))
 	accounts := &Accounts{store: s, browser: b}
 	alert := &alerts{store: s}
-	q := queue.New(s, b, func(t store.Task) {
+	q := queue.New(s, b, filepath.Join(dir, "shots"), func(t store.Task) {
 		TaskUpdated.Broadcast(t)
 		alert.taskChanged(t)
 	}, func(id string) { accounts.record(platforms.Get(id), false) })
@@ -46,6 +46,7 @@ func main() {
 	mygo.Bind(library)
 	mygo.Bind(accounts)
 	mygo.Bind(&Publisher{store: s, queue: q})
+	go q.PruneShots()
 	settings := &Settings{store: s, dataDir: dir}
 	mygo.Bind(settings)
 	// The page shows the background image as bg://localhost/<name>, which
