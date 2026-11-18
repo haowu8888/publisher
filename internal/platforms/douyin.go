@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
@@ -195,6 +196,10 @@ func douyinCollection(ctx context.Context, page *rod.Page, kind store.Kind, name
 	return pickByName(ctx, page, option, `[class*="option-title"]`, name, "合集", 10*time.Second)
 }
 
+// douyinProgress matches the image upload's progress: a percentage and
+// the count of pictures uploaded, as in "37%" and "1/4".
+var douyinProgress = regexp.MustCompile(`\d+(\.\d+)?%|\d+/\d+`)
+
 // douyinImages starts an image post of an article's pictures, the cover
 // first, and waits until they are all uploaded. Douyin takes 35 at most.
 func douyinImages(ctx context.Context, page *rod.Page, j Job, titleSel string) error {
@@ -221,14 +226,29 @@ func douyinImages(ctx context.Context, page *rod.Page, j Job, titleSel string) e
 	if _, err := waitElement(ctx, page, titleSel, "creator-micro"); err != nil {
 		return err
 	}
+	// Uploads can take minutes on a slow line, so give up only when the
+	// progress (the current picture's percentage, "1/4") stops moving.
 	want := fmt.Sprintf("已添加%d张图片", len(images))
-	for deadline := time.Now().Add(2 * time.Minute); ; {
+	var progress string
+	failed := -1 // failure messages the page already showed
+	for deadline := time.Now().Add(3 * time.Minute); ; {
 		res, err := page.Timeout(evalTimeout).Eval(`() => document.body.innerText`)
-		if err == nil && strings.Contains(res.Value.Str(), want) && !strings.Contains(res.Value.Str(), "上传中") {
-			return nil
+		if err == nil {
+			body := res.Value.Str()
+			if strings.Contains(body, want) && !strings.Contains(body, "上传中") {
+				return nil
+			}
+			if n := len(uploadFailed.FindAllString(body, -1)); failed < 0 {
+				failed = n
+			} else if n > failed {
+				return errors.New("图片上传失败，请在浏览器中查看页面提示后重试")
+			}
+			if p := strings.Join(douyinProgress.FindAllString(body, -1), " "); p != progress {
+				progress, deadline = p, time.Now().Add(3*time.Minute)
+			}
 		}
 		if time.Now().After(deadline) {
-			return fmt.Errorf("图片没有全部上传成功（应为 %d 张）", len(images))
+			return fmt.Errorf("图片上传 3 分钟没有进展，没有全部上传成功（应为 %d 张）", len(images))
 		}
 		if err := sleep(ctx, time.Second); err != nil {
 			return err
