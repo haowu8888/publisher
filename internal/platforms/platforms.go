@@ -111,12 +111,14 @@ func (l Limits) fitText(text string, tags []string) string {
 }
 
 var (
-	biliLimits     = Limits{Title: 80, Text: 2000}
-	douyinLimits   = Limits{Title: 30, Text: 1000, Tags: 5}
-	kuaishouLimits = Limits{Text: 500, Tags: 4}
-	xhsLimits      = Limits{Title: 20, Text: 1000, Tags: 10}
-	channelsLimits = Limits{Text: 1000, Tags: 10}
-	mpLimits       = Limits{Title: 64}
+	biliLimits   = Limits{Title: 80, Text: 2000}
+	douyinLimits = Limits{Title: 30, Text: 1000, Tags: 5}
+	// Douyin's image posts (图文), which articles go out as.
+	douyinImageLimits = Limits{Title: 20, Text: 1000, Tags: 5}
+	kuaishouLimits    = Limits{Text: 500, Tags: 4}
+	xhsLimits         = Limits{Title: 20, Text: 1000, Tags: 10}
+	channelsLimits    = Limits{Text: 1000, Tags: 10}
+	mpLimits          = Limits{Title: 64}
 	// Baijiahao's video takes no description, only a short one that
 	// shows as its title.
 	bjhVideoLimits   = Limits{Title: 50}
@@ -142,12 +144,13 @@ var All = []*Platform{
 		Check:         checkBilibili,
 	},
 	{
-		ID: "douyin", Name: "抖音", Kinds: video,
+		ID: "douyin", Name: "抖音", Kinds: videoText,
 		HomeURL: "https://creator.douyin.com/creator-micro/home",
 		Cookie:  "sessionid", CookieDomain: "douyin.com",
 		CookieDomains: []string{"douyin.com"},
 		Publish:       publishDouyin,
-		Limits:        map[string]Limits{"video": douyinLimits},
+		Limits:        map[string]Limits{"video": douyinLimits, "article": douyinImageLimits},
+		Check:         checkDouyin,
 		Collections:   true,
 		// Douyin signs its write requests with keys kept in the page's
 		// storage beside the login, so copied cookies show as logged in

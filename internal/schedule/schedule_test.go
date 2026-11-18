@@ -89,6 +89,14 @@ func TestPending(t *testing.T) {
 	if ids := Targets(sc, store.Material{Kind: store.KindVideo}); !equal(ids, []string{"bilibili", "kuaishou"}) {
 		t.Errorf("Targets with statement = %v", ids)
 	}
+	// Douyin posts an article as pictures, so it needs some.
+	sc.Platforms[store.KindArticle] = []string{"douyin", "weixin-mp"}
+	if ids := Targets(sc, store.Material{Kind: store.KindArticle}); !equal(ids, []string{"weixin-mp"}) {
+		t.Errorf("Targets for an article without pictures = %v", ids)
+	}
+	if ids := Targets(sc, store.Material{Kind: store.KindArticle, CoverPath: "c.jpg"}); !equal(ids, []string{"douyin", "weixin-mp"}) {
+		t.Errorf("Targets for an article with a cover = %v", ids)
+	}
 }
 
 func equal(a, b []string) bool {

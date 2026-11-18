@@ -114,17 +114,21 @@ func Pending(s *store.Store, sc store.Schedule) []store.Material {
 	return out
 }
 
-// Targets returns the platforms sc publishes m to. Bilibili requires a
-// creation statement, so it is left out for a material without one when
-// sc has none to give it either.
+// Targets returns the platforms sc publishes m to, leaving out those that
+// would refuse it: Bilibili, which requires a creation statement, for a
+// material without one when sc has none to give it either, and Douyin for
+// an article without pictures.
 func Targets(sc store.Schedule, m store.Material) []string {
+	if m.Statement == "" {
+		m.Statement = sc.Statement
+	}
 	var out []string
 	for _, id := range sc.Platforms[m.Kind] {
 		p := platforms.Get(id)
 		if p == nil || !p.Ready() || !p.Takes(m.Kind) {
 			continue
 		}
-		if id == "bilibili" && m.Statement == "" && sc.Statement == "" {
+		if p.Check != nil && p.Check(m, store.ModeAuto) != nil {
 			continue
 		}
 		out = append(out, id)

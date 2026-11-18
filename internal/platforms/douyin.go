@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"publisher/internal/browser"
@@ -12,17 +13,31 @@ import (
 	"github.com/go-rod/rod"
 )
 
-// publishDouyin uploads a video through the creator center. After the file
-// is chosen the page moves on to the publish form, where the upload goes
-// on while the form is filled. Selectors as of November 2026.
+// publishDouyin uploads a video, or an article's pictures as an image post
+// (图文) with the article as its text, through the creator center. After
+// the files are chosen the page moves on to the publish form, where a
+// video's upload goes on while the form is filled. Selectors as of
+// November 2026.
 func publishDouyin(ctx context.Context, b *browser.Browser, j Job) error {
 	m := j.Material
-	page, err := openForm(ctx, b, "https://creator.douyin.com/creator-micro/content/upload", j)
+	limits, url := douyinLimits, "https://creator.douyin.com/creator-micro/content/upload"
+	if m.Kind == store.KindArticle {
+		limits, url = douyinImageLimits, url+"?default-tab=3"
+	}
+	page, err := openForm(ctx, b, url, j)
 	if err != nil {
 		return err
 	}
 	const titleSel = `input[placeholder*="作品标题"]`
-	if err := startUpload(ctx, page, `input[type="file"]`, "creator-micro", m.VideoPath, titleSel); err != nil {
+	desc := m.Description
+	if m.Kind == store.KindArticle {
+		if err := douyinImages(ctx, page, j, titleSel); err != nil {
+			return err
+		}
+		if desc == "" {
+			desc = paragraphs(articleBody(m))
+		}
+	} else if err := startUpload(ctx, page, `input[type="file"]`, "creator-micro", m.VideoPath, titleSel); err != nil {
 		return err
 	}
 
@@ -32,7 +47,7 @@ func publishDouyin(ctx context.Context, b *browser.Browser, j Job) error {
 		return err
 	}
 	dismissGuides(page)
-	if err := fill(page, title, fitTitle(m.Title, douyinLimits.Title)); err != nil {
+	if err := fill(page, title, fitTitle(m.Title, limits.Title)); err != nil {
 		return err
 	}
 
@@ -41,13 +56,13 @@ func publishDouyin(ctx context.Context, b *browser.Browser, j Job) error {
 	if err != nil {
 		return fmt.Errorf("未找到简介输入框: %w", err)
 	}
-	if m.Description != "" {
-		if err := typeInto(page, editor, douyinLimits.fitText(m.Description, m.Tags)+" "); err != nil {
+	if desc != "" {
+		if err := typeInto(page, editor, limits.fitText(desc, m.Tags)+" "); err != nil {
 			return err
 		}
 	}
 	for i, tag := range m.Tags {
-		if i == douyinLimits.Tags {
+		if i == limits.Tags {
 			break
 		}
 		// A space after "#话题" turns it into a topic.
@@ -61,17 +76,20 @@ func publishDouyin(ctx context.Context, b *browser.Browser, j Job) error {
 
 	if j.Collection != "" {
 		j.Report("添加到合集")
-		if err := douyinCollection(ctx, page, j.Collection); err != nil {
+		if err := douyinCollection(ctx, page, m.Kind, j.Collection); err != nil {
 			return err
 		}
 	}
 
-	if err := waitUploaded(ctx, page, j); err != nil {
-		return err
-	}
-	note, err := setCover(ctx, page, j, douyinCover)
-	if err != nil {
-		return err
+	// An image post's cover is its first picture, the material's cover.
+	note := ""
+	if m.Kind == store.KindVideo {
+		if err := waitUploaded(ctx, page, j); err != nil {
+			return err
+		}
+		if note, err = setCover(ctx, page, j, douyinCover); err != nil {
+			return err
+		}
 	}
 	if j.Mode == store.ModeReview {
 		j.Report(reviewNote + note)
@@ -134,16 +152,71 @@ func douyinCover(ctx context.Context, page *rod.Page, path string) error {
 	}
 }
 
-// douyinCollection adds the video to the user's collection (合集) name.
-func douyinCollection(ctx context.Context, page *rod.Page, name string) error {
-	sel, err := find(page, `[class*="select-collection"]`, 10*time.Second)
+// douyinCollection adds the post to the user's collection (合集) name.
+// The image post's form has a select of its own.
+func douyinCollection(ctx context.Context, page *rod.Page, kind store.Kind, name string) error {
+	box, option := `[class*="select-collection"]`, ".collection-option"
+	if kind == store.KindArticle {
+		box, option = `[class*="mix-sel-wrap"] .semi-select:not([class*="select-mix-type"])`, ".semi-select-option"
+	}
+	sel, err := find(page, box, 10*time.Second)
 	if err != nil {
 		return fmt.Errorf("未找到合集选择框: %w", err)
 	}
 	if err := jsClick(sel); err != nil {
 		return err
 	}
-	return pickByName(ctx, page, ".collection-option", `[class*="option-title"]`, name, "合集", 10*time.Second)
+	return pickByName(ctx, page, option, `[class*="option-title"]`, name, "合集", 10*time.Second)
+}
+
+// douyinImages starts an image post of an article's pictures, the cover
+// first, and waits until they are all uploaded. Douyin takes 35 at most.
+func douyinImages(ctx context.Context, page *rod.Page, j Job, titleSel string) error {
+	images := noteImages(j.Material)
+	if len(images) > 35 {
+		images = images[:35]
+	}
+	j.Report("上传图片")
+	const sel = `input[type="file"][accept^="image"]`
+	if _, err := waitElement(ctx, page, sel, "creator-micro"); err != nil {
+		return err
+	}
+	// The widget ignores files given before its script is ready.
+	if err := sleep(ctx, 2*time.Second); err != nil {
+		return err
+	}
+	in, err := page.Element(sel)
+	if err != nil {
+		return err
+	}
+	if err := in.SetFiles(images); err != nil {
+		return err
+	}
+	if _, err := waitElement(ctx, page, titleSel, "creator-micro"); err != nil {
+		return err
+	}
+	want := fmt.Sprintf("已添加%d张图片", len(images))
+	for deadline := time.Now().Add(2 * time.Minute); ; {
+		res, err := page.Timeout(evalTimeout).Eval(`() => document.body.innerText`)
+		if err == nil && strings.Contains(res.Value.Str(), want) && !strings.Contains(res.Value.Str(), "上传中") {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("图片没有全部上传成功（应为 %d 张）", len(images))
+		}
+		if err := sleep(ctx, time.Second); err != nil {
+			return err
+		}
+	}
+}
+
+// checkDouyin refuses an article without pictures: Douyin posts it as
+// pictures.
+func checkDouyin(m store.Material, mode store.Mode) error {
+	if m.Kind == store.KindArticle && len(noteImages(m)) == 0 {
+		return errors.New("抖音的文章发成图文，需要至少一张图片（封面或文章图片）")
+	}
+	return nil
 }
 
 // reviewNote is the last step of a review mode publish.
