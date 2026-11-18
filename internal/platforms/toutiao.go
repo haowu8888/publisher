@@ -366,7 +366,8 @@ func ttSubmit(ctx context.Context, page *rod.Page, j Job) error {
 	if err := clickVisible(ctx, page, "button.byte-btn-primary", "^发布$", 10*time.Second); err != nil {
 		return err
 	}
-	if err := waitPublished(ctx, page, []string{"/manage", "/content"}, "发布成功|提交成功"); err != nil {
+	// A published vertical video lands on the list of small videos.
+	if err := waitPublished(ctx, page, []string{"xigua/small-video", "/manage", "/content"}, "发布成功|提交成功"); err != nil {
 		return err
 	}
 	return finish(page, j, "发布成功")

@@ -84,6 +84,9 @@ func publishDouyin(ctx context.Context, b *browser.Browser, j Job) error {
 	// An image post's cover is its first picture, the material's cover.
 	note := ""
 	if m.Kind == store.KindVideo {
+		if err := douyinNoSync(ctx, page); err != nil {
+			return err
+		}
 		if err := waitUploaded(ctx, page, j); err != nil {
 			return err
 		}
@@ -147,6 +150,29 @@ func douyinCover(ctx context.Context, page *rod.Page, path string) error {
 			return errors.New("封面编辑框没有关闭")
 		}
 		if err := sleep(ctx, 500*time.Millisecond); err != nil {
+			return err
+		}
+	}
+}
+
+// douyinNoSync picks not to post the video to Toutiao too (同时发布到今日头条,
+// on by default), which is published to on its own. Accounts not linked to
+// Toutiao have no such choice.
+func douyinNoSync(ctx context.Context, page *rod.Page) error {
+	for deadline := time.Now().Add(5 * time.Second); ; {
+		res, err := page.Timeout(evalTimeout).Eval(`() => {
+			const off = [...document.querySelectorAll("label[class*=radio-item]")].find((e) => e.textContent.trim() === "不同时发布");
+			if (!off) return false;
+			if (off.dataset.checked !== "true") off.click();
+			return off.dataset.checked === "true";
+		}`)
+		if err != nil {
+			return err
+		}
+		if res.Value.Bool() || time.Now().After(deadline) {
+			return nil
+		}
+		if err := sleep(ctx, time.Second); err != nil {
 			return err
 		}
 	}
