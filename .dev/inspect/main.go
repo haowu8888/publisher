@@ -9,7 +9,8 @@
 // "shadow:<selector>" prints the element's shadow root, closed or not, and
 // "cookies:<name,...>" prints the profile's cookies of those names, and
 // "close" closes the tab and "shadowclick:<host>|<selector>" clicks an
-// element in a host's shadow root, closed or not.
+// element in a host's shadow root, closed or not. "chooser:<selector>|<text>|<file>"
+// clicks an element and answers the file chooser it opens.
 //
 // A first argument starting with "http" opens a new tab; otherwise it picks
 // the open tab whose URL contains it.
@@ -67,6 +68,18 @@ func main() {
 			host, sel, _ := strings.Cut(arg, "|")
 			page.MustElement(host).MustShadowRoot().MustElement(sel).MustEval(`() => this.click()`)
 			fmt.Println("clicked")
+			return
+		}
+		if arg, ok := strings.CutPrefix(string(js), "chooser:"); ok {
+			// "chooser:<selector>|<text regexp>|<files>" clicks the element
+			// as a user would and answers the file chooser it opens, for a
+			// page that ignores files set on its input by script.
+			sel, rest, _ := strings.Cut(arg, "|")
+			text, files, _ := strings.Cut(rest, "|")
+			set := page.MustHandleFileDialog()
+			page.MustElementR(sel, text).MustClick()
+			set(strings.Split(files, ";")...)
+			fmt.Println("chosen", files)
 			return
 		}
 		if names, ok := strings.CutPrefix(string(js), "cookies:"); ok {

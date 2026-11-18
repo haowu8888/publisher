@@ -142,7 +142,16 @@ func bjhStatement(ctx context.Context, page *rod.Page, statement string) error {
 	if err := clickVisible(ctx, page, ".cheetah-modal-footer button", "^确定$", 5*time.Second); err != nil {
 		return err
 	}
-	return waitGone(ctx, page, ".cheetah-modal-body", 10*time.Second)
+	// The dialog sometimes ignores 确定, so click it again until it closes.
+	for i := 0; ; i++ {
+		if waitGone(ctx, page, ".cheetah-modal-body", 5*time.Second) == nil {
+			return nil
+		}
+		if i == 4 {
+			return errors.New("创作声明对话框没有关闭")
+		}
+		clickVisible(ctx, page, ".cheetah-modal-footer button", "^确定$", 0)
+	}
 }
 
 // bjhUploaded waits until the video upload finishes: the page shows its

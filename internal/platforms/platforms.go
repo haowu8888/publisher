@@ -128,6 +128,14 @@ var (
 	ttVideoLimits = Limits{Title: 30, Text: 400}
 	ttPostLimits  = Limits{Text: 2000, Tags: 5}
 	mpImageLimits = Limits{Title: 20, Text: 1000}
+	// Weibo's video takes its tags as topics in its text; its articles
+	// (头条文章) have no tags.
+	wbVideoLimits   = Limits{Title: 30, Text: 2000, Tags: 10}
+	wbArticleLimits = Limits{Title: 32}
+	// Dayu's video takes its tags apart from its description; its
+	// articles have no tags.
+	dayuVideoLimits   = Limits{Title: 60, Text: 200}
+	dayuArticleLimits = Limits{Title: 50}
 )
 
 var (
@@ -222,6 +230,8 @@ var All = []*Platform{
 		HomeURL: "https://weibo.com",
 		Cookie:  "SUB", CookieDomain: "weibo.com",
 		CookieDomains: []string{"weibo.com", "sina.com.cn"},
+		Publish:       publishWeibo,
+		Limits:        map[string]Limits{"video": wbVideoLimits, "article": wbArticleLimits},
 	},
 	{
 		// WM_ST, on ids.dayu.com, is the sign-on that logs mp.dayu.com in.
@@ -229,6 +239,8 @@ var All = []*Platform{
 		HomeURL: "https://mp.dayu.com/dashboard/index",
 		Cookie:  "WM_ST", CookieDomain: "dayu.com",
 		CookieDomains: []string{"dayu.com"},
+		Publish:       publishDayu,
+		Limits:        map[string]Limits{"video": dayuVideoLimits, "article": dayuArticleLimits},
 	},
 }
 
