@@ -136,6 +136,10 @@ var (
 	// articles have no tags.
 	dayuVideoLimits   = Limits{Title: 60, Text: 200}
 	dayuArticleLimits = Limits{Title: 50}
+	// Qie takes its tags apart from the text; its articles have no
+	// description.
+	qieLimits      = Limits{Title: 64}
+	qieVideoLimits = Limits{Title: 64, Text: 200}
 )
 
 var (
@@ -243,6 +247,17 @@ var All = []*Platform{
 		Check:         checkDayu,
 		Publish:       publishDayu,
 		Limits:        map[string]Limits{"video": dayuVideoLimits, "article": dayuArticleLimits},
+	},
+	{
+		// Its login cookies are on om.qq.com; qq.com would take in the
+		// official account's and Channels'.
+		ID: "qie", Name: "企鹅号", Kinds: videoText,
+		HomeURL: "https://om.qq.com/main",
+		Cookie:  "omtoken", CookieDomain: "om.qq.com",
+		CookieDomains: []string{"om.qq.com"},
+		Check:         checkQie,
+		Publish:       publishQie,
+		Limits:        map[string]Limits{"video": qieVideoLimits, "article": qieLimits},
 	},
 }
 
