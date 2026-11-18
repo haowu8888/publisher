@@ -12,7 +12,7 @@
     - 文章 `.md` 里单独一行、只含 `#标签` 的行（`#` 后紧跟文字，所以 `# 标题`、`## 小节` 不算；代码块里的行也不算）同样作标签，并从正文里去掉（`material.go` 的 `articleTags`/`isTagLine`），一般写在文末，如 `#AI #MCP #人工智能`。Markdown 编辑器会把行首的 `#` 存成 `\#`（防止变成标题），也按标签认。小红书把标签输成话题，公众号不用标签。已经导入的文章不会重新解析
     - 同步文件夹（`Folders`/`AddFolder`/`RemoveFolder`/`SyncFolders`，可添加多个，存在 `data.json` 的 `folders`）：逐个文件夹导入顶层（不含子目录）里没导入过的视频和 `.md`，每个文件夹内视频按文件名自然排序（ep42 在 ep100 前）、文章按文件创建时间（`createdAt`，Windows 外用修改时间）依次加入；读不了的文件夹跳过，列表里显示原因，定时发布就按这个顺序发。读不了的文件留到下次，只有一个都没导入时才报错。设置里打开 `autoSync` 后，定时发布到点时先同步一次（`main.go` 的 `autoSync` → `Library.sync(settleTime)`），5 分钟内改动过的文件（含视频的字幕、封面，文章的图片文件夹，`fresh`）留到下一次，免得发出还没写完的。`store` 的 `Imported` 记下导入过的每个文件，发布过的素材删掉后再同步也不会重新导入；没发布过的删掉时会从 `Imported` 移除，再同步会回来
     - 合集：`Platform.Collections` 为真的平台（抖音、小红书）发布时加入合集。素材的 `Collections` 优先，留空用设置里的默认，填「无」（`store.NoCollection`）不加入；由 `Settings.Collection` 解析后放进 `Job.Collection`，`Job.Original` 来自设置。合集名找不到时任务失败并列出现有合集（`pickByName`）
-  - 标签全部保留，各平台发布时截取：快手前 4 个、抖音前 5 个、B站/小红书前 10 个；标题超出平台上限时用 `fitTitle` 在分句或词边界截断
+  - 标签全部保留，各平台发布时截取：快手前 4 个、抖音前 5 个、B站/小红书前 10 个、百家号视频在作品描述里放得下几个算几个；标题超出平台上限时用 `fitTitle` 在分句或词边界截断
   - 字数上限集中在 `platforms.Limits`（`Platform.Limits`，按素材类型，公众号贴图用 `images`），发布代码和界面共用：素材编辑页的 `showLimits` 实时显示字数并标出会被截断的平台；正文里要打进话题的平台用 `fitText` 给话题留出字数
   - `Accounts`：各平台登录与检测；账号页的「一键检测」逐个检测全部平台，「一键重新登录」同时打开未登录平台的登录页（都已登录时确认后全部重新登录）
   - 发布状态记在素材上（`Material.Published`，平台 → 首次成功时间），由 `store.UpdateTask` 在任务变成成功时写入，`PutMaterial` 不会覆盖；所以删除任务、「清除已结束」后素材仍显示已发布。旧数据在 `store.Open` 时从成功任务补上
@@ -33,14 +33,14 @@
   - 抖音不参与同步（`LoginNote`）：它的写请求用存在页面存储里的密钥签名，只复制 Cookie 时显示已登录，但提交会提示「登录失效」。必须在应用里扫码；「登录」会先清掉该平台旧 Cookie；检测登录看首页有没有「扫码登录」（`LoginText`），不看 Cookie。服务端注销会话后 Cookie 还在，页面原地显示登录框，所以 `loggedOut` 也看页面上有没有「扫码登录」；任务因未登录失败时会把账号标成未登录（`queue.New` 的 `onLoggedOut` → `Accounts.record`，同时发 `accountUpdated`）
   - `resources/` 的内容会被复制到 exe 旁边，所以扩展目录在 `build/windows-amd64/extension`
 - `internal/browser`：启动 Chrome/Edge，配置目录是 `%AppData%\Publisher\chrome-profile`，并能接管上次崩溃后遗留的实例（读 `DevToolsActivePort`）
-- `internal/platforms`：平台注册表 `All`，目前有 B站、抖音、快手、小红书（视频 + 文章）、视频号（视频）、公众号（文章）。每个平台记录支持的素材类型 `Kinds`、创作中心 URL、登录判定和 `Publish` 函数。登录判定用登录 Cookie，或看页面 URL：含 `LoggedInMark` 算已登录，含 `LoginMark` 算未登录
+- `internal/platforms`：平台注册表 `All`，目前有 B站、抖音、快手、小红书（视频 + 文章）、视频号（视频）、公众号（文章）、百家号（视频 + 文章）。每个平台记录支持的素材类型 `Kinds`、创作中心 URL、登录判定和 `Publish` 函数。登录判定用登录 Cookie，或看页面 URL：含 `LoggedInMark` 算已登录，含 `LoginMark` 算未登录
   - `page.go`：共用工具
     - `openForm`、`waitElement`：打开发布页，等待元素出现，同时识别是否跳到了登录页；页面显示「加载失败，请刷新」（快手偶尔这样）时自动刷新一次。`openForm` 在任务期间自动应答页面的原生弹窗（alert、「离开此网站？」），否则页面会卡住，所有 CDP 调用都不返回
     - 页面里的循环检查都用 `page.Timeout(evalTimeout)`；队列每个任务最多一小时，防止一个卡住的页面挡住后面的任务
     - `startUpload`：等上传组件就绪后再给文件，没开始就重传一次。页面刚加载完就给文件会被忽略
     - `waitUploaded`：用「重新上传」出现、「取消上传」消失判断上传完成；`uploadWatch` 发现页面新出现「上传失败」之类的字样就立即失败（第一次看到时已有的算页面固有文字），B站的上传等待也用它
     - `finish`：全自动发布成功后报告最后一步并关掉标签页，否则浏览器一直开着时标签越积越多；失败的留着给用户看
-    - `find`/`findR`：带超时查找元素，但返回的元素不继承超时。直接用 `page.Timeout().Element()` 拿到的元素，后续操作会因为超时而失败
+    - `find`/`findR`：带超时查找元素，但返回的元素不继承超时（`waitElement` 返回的元素也换回默认的 Sleeper，否则之后 `Focus` 里等元素可见会立即报 cannot find element）。直接用 `page.Timeout().Element()` 拿到的元素，后续操作会因为超时而失败
     - `fill`、`typeInto`、`pasteHTML`：写入输入框或富文本编辑器。文章先把 Markdown 用 goldmark 转成 HTML，再模拟粘贴
     - `jsClick`、`clickText`：用脚本点击，绕开引导浮层
     - `setCover`：有封面的视频在上传完成后设置封面（抖音、快手、小红书各自的 `xxxCover`）；设不上不算失败，按 Esc 关掉可能留下的编辑框，在最后一步里注明用了平台默认封面
@@ -51,10 +51,11 @@
     - `xiaohongshu.go`：「发布」按钮在 `xhs-publish-btn` 的封闭 Shadow DOM 里，网页脚本和按文字查找都找不到，用 rod 的 `ShadowRoot()` 穿进去点；视频走视频笔记；有图片的文章走图文笔记（`target=image`，先给 `input.upload-input` 第一张，再给表单里的 `input[multiple]` 其余的，等 `.title-area .status` 显示 `n/18` 且没有 `aria-busy` 的图片；发布成功后 URL 带 `published=true`；正文按段落粘贴），没图片的走「写长文」→「一键排版」→「下一步」→笔记表单。图片顺序是封面在前（`noteImages`）。话题输入 `#tag` 后按回车选中第一个候选。合集：`.collection-plugin-button` → `.collection-plugin-popover .item`。原创声明：`.custom-switch-card`（含「原创声明」）的开关 → 弹窗 `.originalContainer` 勾选同意 →「声明原创」；视频短于 10 秒时开关禁用，跳过并在步骤里注明；要等视频上传完再点。视频封面：`.cover-plugin-preview .cover-edit-entry` → `.cover-modal input.upload-input` → 等 `.uploaded-thumbnail` →「完成」，按钮变成转圈后要几十秒编辑框才关；还显示「完成」说明没点上，再点
     - `weixinmp.go`：从首页跳转后的 URL 里取 token。`Material.WeixinType` 为空发文章：正文里单独一行的图片文件名（如 `3.jpg`，文件存在才算）由 `articleBody` 换成图片，相对路径先找 md 旁边、再找同名文件夹（`articleDirs`）；正文没引用任何图片时，`spreadImages` 把除封面外的 `Images`（`bodyImages`）均匀插到顶层段落之间；正文里的本地图片用 `inlineImages` 转成 data URL 粘贴，编辑器会自动转存到 mmbiz，等没有 `data:` 图片再继续；封面走「从图片库选择」（`.js_imagedialog`）→ 对话框里上传 → 自动选中 →「下一步」→「确认」（`clickVisible` 只点可见对话框的按钮，隐藏对话框里有同名按钮）。为 `images` 时发贴图（`createType=8`）：逐张给 `input[accept^="image/bmp"]`，等列表项的背景图变成 mmbiz 地址（传完）再给下一张，没传完就保存草稿会存不上；上一张没处理完给的文件会被忽略，所以间隔 2 秒并重试；标题限 20 字，描述按段落粘贴。全自动模式只到「保存为草稿」；表单刚填完时编辑器偶尔不理会这次点击，所以每 20 秒没看到「已保存」就再点一次（最多 4 次，重复保存还是同一份草稿）
     - `channels.go`（视频号，`weixin-channels`）：页面用 wujie 微前端，表单在 `wujie-app` 的（开放）Shadow DOM 里，`document.querySelector`、rod 的 `Element`、`document.body.innerText` 都够不着，所以用 `chRoot`/`chFind`/`chWait`/`chClick`/`chText` 在里面查找；发表成功看 URL 变成 `post/list`；`page.go` 的 `bodyText`、`pageNotes` 也读这个 Shadow DOM，所以「登录失效」和超时时的页面提示对视频号同样有效。先传视频（`取消上传` 出现即开始，「发表」不再 disabled 且没有「取消上传」算传完），同时填描述（`.input-editor`，标题不在描述里时放第一行，`#tag ` 加空格变成话题，最多 10 个）。`Limits` 没有标题上限（和快手一样标题并入描述，界面按此计字数），短标题由 `shortTitle` 生成：6–16 字（`shortTitleMax`），符号只留书名号、引号、冒号、加号、问号、百分号、摄氏度，逗号等换成空格，不足 6 字不填。合集：`.post-album-display` → `.post-album-wrap .option-item .name`，选中后显示框文字变成合集名。封面只设个人主页卡片 3:4（`.vertical-cover-wrap .edit-btn` → `.single-cover-uploader-wrap input[type=file]` → 等里面出现 `img` →「确认」，编辑框几秒后才关），分享卡片 4:3 保留视频画面。位置在视频传完后设成「不显示位置」（`chNoLocation`：点 `.position-display-wrap` 打开，再点 `.location-item` 里的「不显示位置」，平台默认会填浏览器定位到的城市）。Cookie 在 `channels.weixin.qq.com`（`sessionid`、`wxuin`），可从 Chrome 同步；公众号的 Cookie 都在 `mp.weixin.qq.com`，所以两者的 `CookieDomains` 分开写，免得一个重新登录清掉另一个
-  - 六个平台都会自动设置封面（小红书图文的封面是第一张图）
+    - `baijiahao.go`（百家号）：`bjhOpen` 先打开同域的 `robots.txt` 删掉编辑器存在 `localStorage` 里的本地草稿（`edit-<id>-news`/`-videoV2`/`-localReload`），再进编辑器，否则新表单会带上次的内容（上一篇的封面，或者在这次的视频旁边多出上一个视频）。视频（`type=videoV2`）：传视频后才出表单；没有标题和简介，只有 50 字的「作品描述」（Lexical 编辑器，界面上显示成标题），所以放标题，`Limits` 只有 `Title: 50`；话题输入 ` #tag` 后点 `[class*=topicItem]` 里同名的候选（没有就第一个），变成 `#tag#`，在描述里有空位才加；创作声明点 `input[placeholder="请选择创作声明"]` 打开弹窗选，素材的声明用 B站的说法，由 `bjhStatements` 对应（「内容无需标注」→「无需声明」）；上传进度是缩略图上 `[class*=tabCoverOverlay]` 里的百分比，消失且封面出现算传完（「发布」按钮上传中也能点）；封面有横（16:9）竖（3:4）两格，竖图设竖封面、横图设横封面（`wide`），点格子 → 弹窗最后一个文件输入框（本地上传）→ 自动选中 →「确定」。文章（`type=news`）：标题是 Lexical（`[data-testid=news-title-input]`），正文是 UEditor iframe（`#ueditor_0`），用 `UE_V2.instants` 的 `setContent` 写入，data URL 图片编辑器会自动转存成 `bjh/picproxy`；封面必填，点「选择封面」框（`-default > -content`，点外框没反应）打开同样的弹窗，素材没封面就用弹窗默认选中的正文第一张图，正文也没图时全自动直接失败；文章没有标签。Cookie 是 `.baidu.com` 的 `BDUSS`。全自动的发布成功判定（跳到 `rc/content` 或出现「发布成功」）还没实测过
+  - 七个平台都会自动设置封面（小红书图文的封面是第一张图）
 - `internal/schedule`：定时发布。视频和文章各有自己的时间、每次条数和平台（`Schedule.Times`/`PerRun`/`Platforms` 都按素材类型，`Ran` 记各类型上次运行）；每 15 秒检查一次，某类型到了设定时间（晚 10 分钟内仍会补跑）就取该类型待发布的前 N 个，按设置的平台以全自动模式入队；「立即发布下一批」两类都发。旧数据的单一 `times`/`perRun` 在 `store.Open` 时复制给两类
   - 待发布：从没被定时排过（`Material.ScheduledAt` 为空）、没在任何平台发布过（`Published` 为空），且没有待确认或进行中的任务；按导入顺序先旧后新。每个素材只会被定时排一次，失败的由用户在任务页重试
-  - B站要创作声明：素材没选时用设置里的默认声明（会写回素材）；默认也没设就跳过 B站
+  - B站要创作声明：素材没选时用设置里的默认声明（会写回素材，发百家号时也这样）；默认也没设就跳过 B站
   - 保存设置时把各类型的 `Ran` 设成现在，避免刚设的、已过去的时间立即触发；设置存在 `data.json` 的 `schedule`
 - `internal/queue`：任务按顺序执行（共用一个浏览器）；开始前检查素材的视频、文章、封面和图片文件都还在，缺了直接报出文件名；`review` 模式只填表，由用户在浏览器里点提交，`auto` 模式会自动提交。一轮任务跑完后，如果浏览器是这轮才打开的、且全是 `auto` 任务（如定时发布），就把浏览器关掉；本来就开着、有确认任务、有任务失败（留着页面给用户看）或设置了 `keepBrowser` 时保留
 - `src/main.ts` + `src/style.css`：原生 TS 界面（确认框用 `ask()`，即 `index.html` 里的 `<dialog id="ask">`，别再用浏览器的 `confirm()`/`alert()`；设置页的勾选框画成开关），分素材库、账号、任务、定时发布、设置五页；素材库和定时发布的待发布列表、任务页都按视频、文章分两个页签，按导入顺序先旧后新列出（和定时发布的顺序一致）；素材编辑框里没保存的修改，在切换素材、页签或页面前自动保存（`keepEdits`）；任务页的「重试失败的」把当前页签里失败、且之后没在该平台发成功的任务重新排队

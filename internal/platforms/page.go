@@ -84,7 +84,8 @@ func waitElement(ctx context.Context, page *rod.Page, sel, keep string) (*rod.El
 			return nil, ErrNotLoggedIn
 		}
 		if el, err := page.Sleeper(rod.NotFoundSleeper).Element(sel); err == nil {
-			return el, nil
+			// Not to fail later waits on it, as for it to show, at once.
+			return el.Sleeper(rod.DefaultSleeper), nil
 		}
 		if !reloaded {
 			if res, err := page.Timeout(evalTimeout).Eval(`() => document.body.innerText`); err == nil && loadFailed.MatchString(res.Value.Str()) {

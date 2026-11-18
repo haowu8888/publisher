@@ -194,7 +194,8 @@ func KindName(k store.Kind) string {
 // publish queues m to its platforms and marks it as queued.
 func (x *Scheduler) publish(m store.Material, sc store.Schedule, now time.Time) error {
 	ids := Targets(sc, m)
-	if m.Statement == "" && slices.Contains(ids, "bilibili") {
+	// Baijiahao takes the statement too, though without one it publishes.
+	if m.Statement == "" && (slices.Contains(ids, "bilibili") || slices.Contains(ids, "baijiahao")) {
 		m.Statement = sc.Statement
 		if err := x.store.PutMaterial(m); err != nil {
 			return err

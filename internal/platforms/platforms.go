@@ -117,7 +117,11 @@ var (
 	xhsLimits      = Limits{Title: 20, Text: 1000, Tags: 10}
 	channelsLimits = Limits{Text: 1000, Tags: 10}
 	mpLimits       = Limits{Title: 64}
-	mpImageLimits  = Limits{Title: 20, Text: 1000}
+	// Baijiahao's video takes no description, only a short one that
+	// shows as its title.
+	bjhVideoLimits   = Limits{Title: 50}
+	bjhArticleLimits = Limits{Title: 64}
+	mpImageLimits    = Limits{Title: 20, Text: 1000}
 )
 
 var (
@@ -188,6 +192,14 @@ var All = []*Platform{
 		Limits:        map[string]Limits{"article": mpLimits, "images": mpImageLimits},
 		// Mass sending needs the admin's QR scan on the phone anyway.
 		AutoNote: "全自动只保存到草稿箱，群发需在公众号后台扫码确认",
+	},
+	{
+		ID: "baijiahao", Name: "百家号", Kinds: videoText,
+		HomeURL: "https://baijiahao.baidu.com/builder/rc/home",
+		Cookie:  "BDUSS", CookieDomain: "baidu.com",
+		CookieDomains: []string{"baidu.com"},
+		Publish:       publishBaijiahao,
+		Limits:        map[string]Limits{"video": bjhVideoLimits, "article": bjhArticleLimits},
 	},
 }
 
