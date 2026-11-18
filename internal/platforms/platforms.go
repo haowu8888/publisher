@@ -217,6 +217,19 @@ var All = []*Platform{
 		Publish:       publishToutiao,
 		Limits:        map[string]Limits{"video": ttVideoLimits, "article": ttPostLimits},
 	},
+	{
+		ID: "weibo", Name: "微博", Kinds: videoText,
+		HomeURL: "https://weibo.com",
+		Cookie:  "SUB", CookieDomain: "weibo.com",
+		CookieDomains: []string{"weibo.com", "sina.com.cn"},
+	},
+	{
+		// WM_ST, on ids.dayu.com, is the sign-on that logs mp.dayu.com in.
+		ID: "dayu", Name: "大鱼号", Kinds: videoText,
+		HomeURL: "https://mp.dayu.com/dashboard/index",
+		Cookie:  "WM_ST", CookieDomain: "dayu.com",
+		CookieDomains: []string{"dayu.com"},
+	},
 }
 
 // Get returns the platform with id, or nil.
