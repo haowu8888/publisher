@@ -210,11 +210,11 @@ func douyinImages(ctx context.Context, page *rod.Page, j Job, titleSel string) e
 	}
 }
 
-// checkDouyin refuses an article without pictures: Douyin posts it as
-// pictures.
-func checkDouyin(m store.Material, mode store.Mode) error {
+// checkPictures refuses an article without pictures on platforms that
+// post articles as pictures (图文): Douyin and Kuaishou.
+func checkPictures(m store.Material, mode store.Mode) error {
 	if m.Kind == store.KindArticle && len(noteImages(m)) == 0 {
-		return errors.New("抖音的文章发成图文，需要至少一张图片（封面或文章图片）")
+		return errors.New("抖音、快手的文章发成图文，需要至少一张图片（封面或文章图片）")
 	}
 	return nil
 }

@@ -16,7 +16,6 @@ import (
 	"publisher/internal/store"
 
 	"github.com/go-rod/rod"
-	"github.com/go-rod/rod/lib/proto"
 )
 
 // publishBaijiahao publishes a video or an article through Baijiahao's
@@ -31,37 +30,9 @@ func publishBaijiahao(ctx context.Context, b *browser.Browser, j Job) error {
 // bjhOpen opens the editor for typ, "videoV2" or "news", without the
 // draft it keeps in the browser's storage, which it would fill the form
 // with: the last material's cover, say, or the last video beside this one.
-// The draft goes from a page of the site's that is not the editor, which
-// could save it again.
 func bjhOpen(ctx context.Context, b *browser.Browser, typ string, j Job) (*rod.Page, error) {
-	page, err := openForm(ctx, b, "https://baijiahao.baidu.com/robots.txt", j)
-	if err != nil {
-		return nil, err
-	}
-	// A new tab may still be on its way from about:blank.
-	for try := 1; ; try++ {
-		_, err := page.Timeout(evalTimeout).Eval(`(typ) => {
-			if (location.host !== "baijiahao.baidu.com") throw new Error("not there yet");
-			Object.keys(localStorage)
-				.filter((k) => k.startsWith("edit-") && (k.endsWith("-" + typ) || k.endsWith("-localReload")))
-				.forEach((k) => localStorage.removeItem(k));
-		}`, typ)
-		if err == nil {
-			break
-		}
-		if try == 5 {
-			return nil, fmt.Errorf("清除百家号编辑器的本地草稿失败: %w", err)
-		}
-		if err := sleep(ctx, time.Second); err != nil {
-			return nil, err
-		}
-	}
-	loaded := page.WaitNavigation(proto.PageLifecycleEventNameLoad)
-	if err := page.Navigate("https://baijiahao.baidu.com/builder/rc/edit?type=" + typ); err != nil {
-		return nil, err
-	}
-	loaded()
-	return page, nil
+	return openFresh(ctx, b, "https://baijiahao.baidu.com/robots.txt",
+		"https://baijiahao.baidu.com/builder/rc/edit?type="+typ, `^edit-.+-(`+typ+`|localReload)$`, j)
 }
 
 // bjhVideo uploads a video. Its form shows once the file is chosen and is

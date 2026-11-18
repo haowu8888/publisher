@@ -53,6 +53,44 @@ func openForm(ctx context.Context, b *browser.Browser, url string, j Job) (*rod.
 	return page, nil
 }
 
+// openFresh is openForm for an editor that fills itself with the draft it
+// keeps in the browser's storage, as what an earlier task left there: it
+// first drops the localStorage keys matching the regular expression stale,
+// on blank, a light page of the site's that is not the editor, which could
+// save the draft again.
+func openFresh(ctx context.Context, b *browser.Browser, blank, url, stale string, j Job) (*rod.Page, error) {
+	page, err := openForm(ctx, b, blank, j)
+	if err != nil {
+		return nil, err
+	}
+	host := strings.Split(strings.SplitN(blank, "://", 2)[1], "/")[0]
+	// A new tab may still be on its way from about:blank.
+	for try := 1; ; try++ {
+		_, err := page.Timeout(evalTimeout).Eval(`(host, stale) => {
+			if (location.host !== host) throw new Error("not there yet");
+			const re = new RegExp(stale);
+			Object.keys(localStorage).filter((k) => re.test(k)).forEach((k) => localStorage.removeItem(k));
+		}`, host, stale)
+		if err == nil {
+			break
+		}
+		if try == 5 {
+			return nil, fmt.Errorf("清除编辑器的本地草稿失败: %w", err)
+		}
+		if err := sleep(ctx, time.Second); err != nil {
+			return nil, err
+		}
+	}
+	// Navigate returns before the page goes; WaitLoad could still see the
+	// blank page.
+	loaded := page.WaitNavigation(proto.PageLifecycleEventNameLoad)
+	if err := page.Navigate(url); err != nil {
+		return nil, err
+	}
+	loaded()
+	return page, nil
+}
+
 // loggedOut reports whether a page meant to stay on a URL containing keep
 // went to a login page instead, or shows one in place, as Douyin does once
 // the server ends a session whose cookie is still there.

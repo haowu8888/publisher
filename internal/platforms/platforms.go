@@ -123,7 +123,11 @@ var (
 	// shows as its title.
 	bjhVideoLimits   = Limits{Title: 50}
 	bjhArticleLimits = Limits{Title: 64}
-	mpImageLimits    = Limits{Title: 20, Text: 1000}
+	// Toutiao's video takes its topics apart from its text, and its micro
+	// posts (微头条), which articles go out as, have no title.
+	ttVideoLimits = Limits{Title: 30, Text: 400}
+	ttPostLimits  = Limits{Text: 2000, Tags: 5}
+	mpImageLimits = Limits{Title: 20, Text: 1000}
 )
 
 var (
@@ -150,7 +154,7 @@ var All = []*Platform{
 		CookieDomains: []string{"douyin.com"},
 		Publish:       publishDouyin,
 		Limits:        map[string]Limits{"video": douyinLimits, "article": douyinImageLimits},
-		Check:         checkDouyin,
+		Check:         checkPictures,
 		Collections:   true,
 		// Douyin signs its write requests with keys kept in the page's
 		// storage beside the login, so copied cookies show as logged in
@@ -159,12 +163,13 @@ var All = []*Platform{
 		LoginText: "扫码登录",
 	},
 	{
-		ID: "kuaishou", Name: "快手", Kinds: video,
+		ID: "kuaishou", Name: "快手", Kinds: videoText,
 		HomeURL:       "https://cp.kuaishou.com/profile",
 		LoginMark:     "passport",
 		CookieDomains: []string{"kuaishou.com"},
 		Publish:       publishKuaishou,
-		Limits:        map[string]Limits{"video": kuaishouLimits},
+		Limits:        map[string]Limits{"video": kuaishouLimits, "article": kuaishouLimits},
+		Check:         checkPictures,
 	},
 	{
 		ID: "xiaohongshu", Name: "小红书", Kinds: videoText,
@@ -203,6 +208,14 @@ var All = []*Platform{
 		CookieDomains: []string{"baidu.com"},
 		Publish:       publishBaijiahao,
 		Limits:        map[string]Limits{"video": bjhVideoLimits, "article": bjhArticleLimits},
+	},
+	{
+		ID: "toutiao", Name: "头条号", Kinds: videoText,
+		HomeURL: "https://mp.toutiao.com/profile_v4/index",
+		Cookie:  "sessionid", CookieDomain: "toutiao.com",
+		CookieDomains: []string{"toutiao.com"},
+		Publish:       publishToutiao,
+		Limits:        map[string]Limits{"video": ttVideoLimits, "article": ttPostLimits},
 	},
 }
 
