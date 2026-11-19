@@ -273,9 +273,12 @@ func Open(path string) (*Store, error) {
 	} else {
 		os.WriteFile(bak, b, 0o644)
 	}
-	// A task cut short by quitting the app will not resume by itself.
+	// A task cut short by quitting the app may have left a form half
+	// filled, or even submitted, so it is not run again by itself. Those
+	// that had not started stay queued: see Queue.Resume. Not those of a
+	// backup, which may have gone out since it was made.
 	for i := range s.d.Tasks {
-		if t := &s.d.Tasks[i]; t.Status == StatusRunning || t.Status == StatusPending {
+		if t := &s.d.Tasks[i]; t.Status == StatusRunning || t.Status == StatusPending && !s.restored.IsZero() {
 			t.Status, t.Error = StatusFailed, "应用退出时任务被中断"
 		}
 	}
@@ -553,6 +556,30 @@ func (s *Store) markPublished(t Task) {
 		m.Published = map[string]time.Time{}
 	}
 	m.Published[t.Platform] = t.UpdatedAt
+}
+
+// Unpublish takes back that material id went out to platform, as when a
+// task took a page for success though nothing was published. Its tasks
+// that succeeded there turn failed, or Open would mark it again from them,
+// and are returned with the material.
+func (s *Store) Unpublish(id, platform string) (Material, []Task, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	i := slices.IndexFunc(s.d.Materials, func(m Material) bool { return m.ID == id })
+	if i < 0 {
+		return Material{}, nil, ErrNotFound
+	}
+	m := &s.d.Materials[i]
+	m.Published = maps.Clone(m.Published)
+	delete(m.Published, platform)
+	var changed []Task
+	for j := range s.d.Tasks {
+		if t := &s.d.Tasks[j]; t.MaterialID == id && t.Platform == platform && t.Status == StatusSuccess {
+			t.Status, t.Step, t.Error, t.UpdatedAt = StatusFailed, "已撤销「已发布」", "平台上其实没有发出去", time.Now()
+			changed = append(changed, *t)
+		}
+	}
+	return *m, changed, s.save()
 }
 
 // DeleteTask removes a task that is not queued or running. One already

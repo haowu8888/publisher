@@ -346,7 +346,7 @@ function renderEditor(m: Material) {
                 : `<span class="pill warn">未登录</span>`;
             return `<label class="plat ${off ? "disabled" : ""}">
               <input type="checkbox" value="${a.id}" ${picks.includes(a.id) ? "checked" : ""} ${off ? "disabled" : ""} />
-              <span class="name">${esc(a.name)}</span>${tag}${a.id in done ? `<span class="pill ok" title="${timeText(done[a.id]!)}">已发布</span>` : ""}</label>`;
+              <span class="name">${esc(a.name)}</span>${tag}${a.id in done ? `<button class="pill ok unpub" data-unpub="${a.id}" title="${timeText(done[a.id]!)} 发布；平台上其实没发出去时点这里撤销">已发布 ×</button>` : ""}</label>`;
           })
           .join("")}
       </div>
@@ -1193,6 +1193,25 @@ view.addEventListener("click", async (e) => {
   if (d.cancel) return void attempt(() => Publisher.cancel(d.cancel!));
   if (d.retry) return void attempt(() => Publisher.retry(d.retry!));
   if (d.shot) return void attempt(() => Publisher.openShot(d.shot!));
+  if (d.unpub) {
+    e.preventDefault();
+    const m = state.materials.find((x) => x.id === state.selected);
+    if (!m) return;
+    const name = platformName(d.unpub);
+    if (
+      !(await ask(`只在${name}上其实没发出去时这样做（如成功被误判）：素材在${name}显示为未发布，那里的成功任务改成失败，可以重试。`, {
+        title: `撤销${name}的「已发布」？`,
+        ok: "撤销",
+        danger: true,
+      }))
+    )
+      return;
+    const saved = await attempt(() => Library.unpublish(m.id, d.unpub!));
+    if (!saved) return;
+    putMaterial(saved);
+    state.tasks = await Publisher.tasks();
+    return render();
+  }
   if (d.done) {
     const failed = state.tasks.find((t) => t.id === d.done)?.status === "failed";
     if (

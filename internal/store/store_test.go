@@ -244,3 +244,63 @@ func TestUpdateTaskWritesNoSteps(t *testing.T) {
 		t.Errorf("a change of status was not written: %v", err)
 	}
 }
+
+// TestOpenKeepsQueuedTasks queues again the tasks that had not started when
+// the app quit, but not one cut short, which may have half filled a form.
+func TestOpenKeepsQueuedTasks(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "data.json")
+	old := `{"tasks": [{"id": "t1", "status": "pending"}, {"id": "t2", "status": "running"}]}`
+	if err := os.WriteFile(path, []byte(old), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]Status{}
+	for _, task := range s.Tasks() {
+		got[task.ID] = task.Status
+	}
+	if got["t1"] != StatusPending || got["t2"] != StatusFailed {
+		t.Errorf("statuses = %v", got)
+	}
+}
+
+// TestUnpublish takes a platform out of Published and fails its successful
+// tasks, so that reopening the store does not mark it again.
+func TestUnpublish(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "data.json")
+	s, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.PutMaterial(Material{ID: "m", Kind: KindVideo}); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []string{"toutiao", "douyin"} {
+		if err := s.AddTask(Task{ID: p, MaterialID: "m", Platform: p, Status: StatusPending}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.UpdateTask(p, func(t *Task) { t.Status = StatusSuccess }); err != nil {
+			t.Fatal(err)
+		}
+	}
+	m, tasks, err := s.Unpublish("m", "toutiao")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := m.Published["toutiao"]; ok || len(tasks) != 1 || tasks[0].Status != StatusFailed {
+		t.Errorf("Unpublish = %v, %v", m.Published, tasks)
+	}
+	s, err = Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, _ = s.Material("m")
+	if _, ok := m.Published["toutiao"]; ok {
+		t.Error("reopening marked it published again")
+	}
+	if _, ok := m.Published["douyin"]; !ok {
+		t.Error("douyin is no longer published")
+	}
+}

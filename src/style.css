@@ -198,6 +198,8 @@ button.ghost.on { color: var(--accent); }
 .pill.warn { color: var(--warn); background: color-mix(in srgb, var(--warn) 12%, transparent); }
 .pill.bad { color: var(--bad); background: color-mix(in srgb, var(--bad) 12%, transparent); }
 .pill.info { color: var(--info); background: color-mix(in srgb, var(--info) 12%, transparent); }
+button.pill.unpub { border: 0; padding: 0 8px; border-radius: 10px; }
+button.pill.unpub:hover:not(:disabled) { color: var(--bad); background: color-mix(in srgb, var(--bad) 12%, transparent); }
 
 /* Accounts */
 .notice {

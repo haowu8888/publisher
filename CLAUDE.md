@@ -15,7 +15,7 @@
   - 标签全部保留，各平台发布时截取：快手前 4 个、抖音前 5 个、B站/小红书/微博视频前 10 个、百家号视频在作品描述里放得下几个算几个、大鱼号视频的标签不超过 10 字的都填；标题超出平台上限时用 `fitTitle` 在分句或词边界截断
   - 字数上限集中在 `platforms.Limits`（`Platform.Limits`，按素材类型，公众号贴图用 `images`），发布代码和界面共用：素材编辑页的 `showLimits` 实时显示字数并标出会被截断的平台；正文里要打进话题的平台用 `fitText` 给话题留出字数
   - `Accounts`：各平台登录与检测；账号页的「一键检测」逐个检测全部平台，「一键重新登录」同时打开未登录平台的登录页（都已登录时确认后全部重新登录）
-  - 发布状态记在素材上（`Material.Published`，平台 → 首次成功时间），由 `store.UpdateTask` 在任务变成成功时写入，`PutMaterial` 不会覆盖；所以删除任务、「清除已结束」后素材仍显示已发布。旧数据在 `store.Open` 时从成功任务补上
+  - 发布状态记在素材上（`Material.Published`，平台 → 首次成功时间），由 `store.UpdateTask` 在任务变成成功时写入，`PutMaterial` 不会覆盖；所以删除任务、「清除已结束」后素材仍显示已发布。旧数据在 `store.Open` 时从成功任务补上。成功被误判时，素材编辑页平台旁的「已发布 ×」调 `Library.Unpublish`（`store.Unpublish`）撤销：去掉该平台的 `Published`，并把该素材在该平台的成功任务改成失败（否则下次 `Open` 又补回来），可以重试
   - `Library.Delete`：素材有排队中或进行中的任务时拒绝（`store.ErrMaterialBusy`），先取消任务
   - `Library.DeletePublished`：批量删除发过的每个平台都已发布、且没有进行中任务的素材（只删记录不删文件）
   - 删素材（`store.DeleteMaterials`）不删它的任务，由任务页「清除已结束」清理；任务入队时记下素材的 `Title`/`Kind`（旧任务在 `store.Open` 时补上），素材删了任务页仍能显示和分页签，但不能重试
@@ -33,7 +33,7 @@
   - 平台的 Cookie 域名在 `Platform.CookieDomains` 里，新增域名时要同步改扩展 `manifest.json` 的 `host_permissions`
   - 抖音不参与同步（`LoginNote`）：它的写请求用存在页面存储里的密钥签名，只复制 Cookie 时显示已登录，但提交会提示「登录失效」。必须在应用里扫码；「登录」会先清掉该平台旧 Cookie；检测登录看首页有没有「扫码登录」（`LoginText`），不看 Cookie。服务端注销会话后 Cookie 还在，页面原地显示登录框，所以 `loggedOut` 也看页面上有没有「扫码登录」；任务因未登录失败时会把账号标成未登录（`queue.New` 的 `onLoggedOut` → `Accounts.record`，同时发 `accountUpdated`）
   - `resources/` 的内容会被复制到 exe 旁边，所以扩展目录在 `build/windows-amd64/extension`
-- `internal/browser`：启动 Chrome/Edge，配置目录是 `%AppData%\Publisher\chrome-profile`，并能接管上次崩溃后遗留的实例（读 `DevToolsActivePort`）
+- `internal/browser`：启动 Chrome/Edge，配置目录是 `%AppData%\Publisher\chrome-profile`，并能接管上次崩溃后遗留的实例（读 `DevToolsActivePort`）。检查浏览器是否还在（`alive`，5 秒）、读 Cookie、关闭都带超时：这些在锁里调用，Chrome 卡死时不能拖住队列和登录检测
 - `internal/platforms`：平台注册表 `All`，目前有 B站（视频）、快手、抖音和小红书（视频 + 文章）、视频号（视频 + 图文）、公众号和头条号（文章）、百家号、微博、大鱼号、企鹅号、搜狐视频和知乎（视频 + 文章）、芒果TV和爱奇艺号（视频）。每个平台记录支持的素材类型 `Kinds`、创作中心 URL、登录判定和 `Publish` 函数。登录判定用登录 Cookie，或看页面 URL：含 `LoggedInMark` 算已登录，含 `LoginMark` 算未登录
   - `page.go`：共用工具
     - `openFresh`：给会从 `localStorage` 恢复上次表单的编辑器用（百家号、头条微头条），先在同域的轻量页面（`robots.txt`）删掉匹配的草稿键再进编辑器，否则新任务会带上上一个任务的内容
@@ -67,7 +67,7 @@
   - 待发布：从没被定时排过（`Material.ScheduledAt` 为空）、没在任何平台发布过（`Published` 为空），且没有待确认或进行中的任务；按导入顺序先旧后新。每个素材只会被定时排一次，失败的由用户在任务页重试
   - B站要创作声明：素材没选时用设置里的默认声明（会写回素材，发百家号时也这样）；默认也没设就跳过 B站
   - 保存设置时把各类型的 `Ran` 设成现在，避免刚设的、已过去的时间立即触发；设置存在 `data.json` 的 `schedule`
-- `internal/queue`：任务按顺序执行（共用一个浏览器）；开始前检查素材的视频、文章、封面和图片文件都还在，缺了直接报出文件名；`review` 模式只填表，由用户在浏览器里点提交，`auto` 模式会自动提交。一轮任务跑完后，如果浏览器是这轮才打开的、且全是 `auto` 任务（如定时发布），就把浏览器关掉；本来就开着、有确认任务、有任务失败（留着页面给用户看）或设置了 `keepBrowser` 时保留。任务失败（取消不算）时截下它最后打开的标签页（`browser.Last`）存成数据目录 `shots/<任务id>.jpg`，任务标上 `Shot`，任务页显示「截图」按钮（`Publisher.OpenShot` 用系统看图打开）；重试时删掉，删除任务、「清除已结束」和启动时 `PruneShots` 清理没有对应任务的截图
+- `internal/queue`：任务按顺序执行（共用一个浏览器）；应用退出时进行中的任务在下次 `store.Open` 时标成失败（表单可能填了一半甚至已提交），排队中的保留，启动时 `Queue.Resume` 接着跑（从备份恢复时排队中的也标失败）；开始前检查素材的视频、文章、封面和图片文件都还在，缺了直接报出文件名；`review` 模式只填表，由用户在浏览器里点提交，`auto` 模式会自动提交。一轮任务跑完后，如果浏览器是这轮才打开的、且全是 `auto` 任务（如定时发布），就把浏览器关掉；本来就开着、有确认任务、有任务失败（留着页面给用户看）或设置了 `keepBrowser` 时保留。任务失败（取消不算）时截下它最后打开的标签页（`browser.Last`）存成数据目录 `shots/<任务id>.jpg`，任务标上 `Shot`，任务页显示「截图」按钮（`Publisher.OpenShot` 用系统看图打开）；重试时删掉，删除任务、「清除已结束」和启动时 `PruneShots` 清理没有对应任务的截图
 - `src/main.ts` + `src/style.css`：原生 TS 界面（确认框用 `ask()`，即 `index.html` 里的 `<dialog id="ask">`，别再用浏览器的 `confirm()`/`alert()`；设置页的勾选框画成开关），分素材库、账号、任务、定时发布、设置五页；素材库和定时发布的待发布列表、任务页都按视频、文章分两个页签，按导入顺序先旧后新列出（和定时发布的顺序一致）；素材编辑框里没保存的修改，在切换素材、页签或页面前自动保存（`keepEdits`）；任务页的「重试失败的」把当前页签里失败、且之后没在该平台发成功的任务重新排队
 
 ## 新增一个平台的发布

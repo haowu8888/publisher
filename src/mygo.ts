@@ -292,6 +292,14 @@ export const Library = {
   syncFolders(): Promise<Material[]> {
     return call("Library.SyncFolders");
   },
+  /**
+   * Unpublish takes back that a material went out to a platform, which a
+   * task took for success though nothing was published there; its tasks
+   * there turn failed, to retry, and the page reloads them.
+   */
+  unpublish(id: string, platform: string): Promise<Material> {
+    return call("Library.Unpublish", id, platform);
+  },
   /** Update saves edits to a material's title, description, tags or body. */
   update(m: Material): Promise<Material> {
     return call("Library.Update", m);

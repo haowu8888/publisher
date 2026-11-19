@@ -379,6 +379,14 @@ func (l *Library) Reveal(id string) error {
 // task queued or running stays too.
 func (l *Library) Delete(id string) error { return l.store.DeleteMaterials(id) }
 
+// Unpublish takes back that a material went out to a platform, which a
+// task took for success though nothing was published there; its tasks
+// there turn failed, to retry, and the page reloads them.
+func (l *Library) Unpublish(id, platform string) (store.Material, error) {
+	m, _, err := l.store.Unpublish(id, platform)
+	return m, err
+}
+
 // DeletePublished removes the materials published to every platform they
 // were sent to and returns their ids; their tasks and files stay.
 // A material with a publish still under way, or a platform it has not gone

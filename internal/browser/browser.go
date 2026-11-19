@@ -38,7 +38,7 @@ func (x *Browser) Get() (*rod.Browser, error) {
 	x.mu.Lock()
 	defer x.mu.Unlock()
 	if x.b != nil {
-		if _, err := x.b.Version(); err == nil {
+		if alive(x.b) {
 			return x.b, nil
 		}
 		x.closeLocked()
@@ -158,17 +158,21 @@ func (x *Browser) Cookies() ([]*proto.NetworkCookie, error) {
 	if b == nil {
 		return nil, nil
 	}
-	return b.GetCookies()
+	return b.Timeout(10 * time.Second).GetCookies()
 }
 
 // Running reports whether the browser was launched and is still open.
 func (x *Browser) Running() bool {
 	x.mu.Lock()
 	defer x.mu.Unlock()
-	if x.b == nil {
-		return false
-	}
-	_, err := x.b.Version()
+	return x.b != nil && alive(x.b)
+}
+
+// alive reports whether b answers. A Chrome that hangs, rather than quits,
+// must not hold the lock, and with it the queue and the login checks,
+// forever.
+func alive(b *rod.Browser) bool {
+	_, err := b.Timeout(5 * time.Second).Version()
 	return err == nil
 }
 
@@ -181,7 +185,7 @@ func (x *Browser) Close() {
 
 func (x *Browser) closeLocked() {
 	if x.b != nil {
-		x.b.Close()
+		x.b.Timeout(5 * time.Second).Close()
 		x.b = nil
 	}
 	if x.l != nil {

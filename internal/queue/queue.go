@@ -127,6 +127,9 @@ func (q *Queue) Cancel(id string) error {
 	return err
 }
 
+// Resume runs the tasks left queued when the app last quit.
+func (q *Queue) Resume() { q.poke() }
+
 func (q *Queue) poke() {
 	select {
 	case q.wake <- struct{}{}:

@@ -47,6 +47,7 @@ func main() {
 	mygo.Bind(accounts)
 	mygo.Bind(&Publisher{store: s, queue: q})
 	go q.PruneShots()
+	q.Resume()
 	settings := &Settings{store: s, dataDir: dir}
 	mygo.Bind(settings)
 	// The page shows the background image as bg://localhost/<name>, which
