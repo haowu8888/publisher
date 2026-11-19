@@ -57,6 +57,9 @@ func qieVideo(ctx context.Context, b *browser.Browser, j Job) error {
 	if err := startUpload(ctx, page, `input[type="file"]`, "creation/video", m.VideoPath, qieTitle); err != nil {
 		return err
 	}
+	if err := qieQuota(page); err != nil {
+		return err
+	}
 	dismissGuides(page)
 	if err := qieFillTitle(ctx, page, m.Title); err != nil {
 		return err
@@ -377,9 +380,35 @@ func qieCoverShown(ctx context.Context, page *rod.Page, img string) error {
 	}
 }
 
+// qieQuota fails when the account has used up the day's posts: om.qq.com
+// takes 5 a day, videos and articles together, and then disables 发布
+// without saying why. The count is in the props of the form's footer.
+func qieQuota(page *rod.Page) error {
+	res, err := page.Timeout(evalTimeout).Eval(`() => {
+		const b = [...document.querySelectorAll("footer button")].find((b) => b.textContent.trim() === "发布");
+		const key = b && Object.keys(b).find((k) => k.startsWith("__reactInternalInstance") || k.startsWith("__reactFiber"));
+		for (let f = key && b[key]; f; f = f.return) {
+			const p = f.memoizedProps;
+			if (p && "maxPublishCount" in p) return { max: p.maxPublishCount, done: p.publishedCount, remain: p.remain };
+		}
+		return null;
+	}`)
+	if err != nil || res.Value.Nil() {
+		return nil
+	}
+	v := res.Value
+	if v.Get("remain").Nil() || v.Get("remain").Int() > 0 {
+		return nil
+	}
+	return fmt.Errorf("企鹅号今天的发布次数已用完（每天 %d 条，视频和文章合计，已发 %d 条），明天再试", v.Get("max").Int(), v.Get("done").Int())
+}
+
 // qieSubmit publishes the filled form.
 func qieSubmit(ctx context.Context, page *rod.Page, j Job, note string) error {
 	j.Report("提交发布")
+	if err := qieQuota(page); err != nil {
+		return err
+	}
 	startNotes(page)
 	if err := clickVisible(ctx, page, "button.omui-button--primary", "^发布$", 10*time.Second); err != nil {
 		return err
@@ -408,6 +437,9 @@ func qieArticle(ctx context.Context, b *browser.Browser, j Job) error {
 	}
 	j.Report("填写标题和正文")
 	if _, err := waitElement(ctx, page, qieTitle, "creation/article"); err != nil {
+		return err
+	}
+	if err := qieQuota(page); err != nil {
 		return err
 	}
 	if err := qieDropCache(ctx, page); err != nil {

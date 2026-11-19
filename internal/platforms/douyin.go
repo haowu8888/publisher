@@ -85,15 +85,16 @@ func publishDouyin(ctx context.Context, b *browser.Browser, j Job) error {
 	// An image post's cover is its first picture, the material's cover.
 	note := ""
 	if m.Kind == store.KindVideo {
-		if err := douyinNoSync(ctx, page); err != nil {
-			return err
-		}
+		j.Report("同时发布到今日头条")
+		note = douyinSync(ctx, page)
 		if err := waitUploaded(ctx, page, j); err != nil {
 			return err
 		}
-		if note, err = setCover(ctx, page, j, douyinCover); err != nil {
+		cover, err := setCover(ctx, page, j, douyinCover)
+		if err != nil {
 			return err
 		}
+		note += cover
 	}
 	if j.Mode == store.ModeReview {
 		j.Report(reviewNote + note)
@@ -156,25 +157,42 @@ func douyinCover(ctx context.Context, page *rod.Page, path string) error {
 	}
 }
 
-// douyinNoSync picks not to post the video to Toutiao too (同时发布到今日头条,
-// on by default), which is published to on its own. Accounts not linked to
-// Toutiao have no such choice.
-func douyinNoSync(ctx context.Context, page *rod.Page) error {
+// douyinSync picks to post the video to Toutiao too (同时发布到 with the
+// 今日头条 switch on), which takes the place of publishing videos to
+// Toutiao on their own. Accounts not linked to Toutiao have no such
+// choice. The note returned says when it did not take; the video goes out
+// to Douyin all the same.
+func douyinSync(ctx context.Context, page *rod.Page) string {
 	for deadline := time.Now().Add(5 * time.Second); ; {
 		res, err := page.Timeout(evalTimeout).Eval(`() => {
-			const off = [...document.querySelectorAll("label[class*=radio-item]")].find((e) => e.textContent.trim() === "不同时发布");
-			if (!off) return false;
-			if (off.dataset.checked !== "true") off.click();
-			return off.dataset.checked === "true";
+			const on = [...document.querySelectorAll("label[class*=radio-item]")].find((e) => e.textContent.trim() === "同时发布到");
+			if (!on) return "none";
+			if (on.dataset.checked !== "true") {
+				on.click();
+				return "";
+			}
+			const app = [...document.querySelectorAll("[class*=app-group-container-item]")].find((e) => e.textContent.trim() === "今日头条");
+			const sw = app?.querySelector("input[role=switch]");
+			if (!sw) return "";
+			// A click on the switch's box does nothing; its input takes it.
+			if (!sw.checked) sw.click();
+			return sw.checked ? "on" : "";
 		}`)
-		if err != nil {
-			return err
+		if err == nil {
+			switch res.Value.Str() {
+			case "on":
+				return ""
+			case "none":
+				if time.Now().After(deadline) {
+					return "（抖音账号没有绑定今日头条，没有同时发布到头条）"
+				}
+			}
 		}
-		if res.Value.Bool() || time.Now().After(deadline) {
-			return nil
+		if time.Now().After(deadline) {
+			return "（没能勾选同时发布到今日头条）"
 		}
 		if err := sleep(ctx, time.Second); err != nil {
-			return err
+			return ""
 		}
 	}
 }
@@ -257,10 +275,10 @@ func douyinImages(ctx context.Context, page *rod.Page, j Job, titleSel string) e
 }
 
 // checkPictures refuses an article without pictures on platforms that
-// post articles as pictures (图文): Douyin and Kuaishou.
+// post articles as pictures (图文): Douyin, Kuaishou and Channels.
 func checkPictures(m store.Material, mode store.Mode) error {
 	if m.Kind == store.KindArticle && len(noteImages(m)) == 0 {
-		return errors.New("抖音、快手的文章发成图文，需要至少一张图片（封面或文章图片）")
+		return errors.New("抖音、快手、视频号的文章发成图文，需要至少一张图片（封面或文章图片）")
 	}
 	return nil
 }

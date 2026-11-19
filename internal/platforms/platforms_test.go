@@ -95,3 +95,11 @@ func TestMgtvTagLen(t *testing.T) {
 		}
 	}
 }
+
+func TestChTopic(t *testing.T) {
+	for tag, want := range map[string]bool{"AI代理": true, "GPT-6": true, "GPT-6.2": false, "C++": false, "AI 工具": false} {
+		if got := chTopic.MatchString(tag); got != want {
+			t.Errorf("chTopic(%q) = %v, want %v", tag, got, want)
+		}
+	}
+}

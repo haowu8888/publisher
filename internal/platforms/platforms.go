@@ -118,14 +118,15 @@ var (
 	kuaishouLimits    = Limits{Text: 500, Tags: 4}
 	xhsLimits         = Limits{Title: 20, Text: 1000, Tags: 10}
 	channelsLimits    = Limits{Text: 1000, Tags: 10}
-	mpLimits          = Limits{Title: 64}
+	// Channels' picture posts, which articles go out as.
+	channelsImageLimits = Limits{Title: 22, Text: 1000, Tags: 10}
+	mpLimits            = Limits{Title: 64}
 	// Baijiahao's video takes no description, only a short one that
 	// shows as its title.
 	bjhVideoLimits   = Limits{Title: 50}
 	bjhArticleLimits = Limits{Title: 64}
-	// Toutiao's video takes its topics apart from its text, and its micro
-	// posts (微头条), which articles go out as, have no title.
-	ttVideoLimits = Limits{Title: 30, Text: 400}
+	// Toutiao's micro posts (微头条), which articles go out as, have no
+	// title.
 	ttPostLimits  = Limits{Text: 2000, Tags: 5}
 	mpImageLimits = Limits{Title: 20, Text: 1000}
 	// Weibo's video takes its tags as topics in its text; its articles
@@ -204,12 +205,13 @@ var All = []*Platform{
 		Collections:   true,
 	},
 	{
-		ID: "weixin-channels", Name: "视频号", Kinds: video,
+		ID: "weixin-channels", Name: "视频号", Kinds: videoText,
 		HomeURL:       "https://channels.weixin.qq.com/platform",
 		LoginMark:     "login",
 		CookieDomains: []string{"channels.weixin.qq.com"},
 		Publish:       publishWeixinChannels,
-		Limits:        map[string]Limits{"video": channelsLimits},
+		Limits:        map[string]Limits{"video": channelsLimits, "article": channelsImageLimits},
+		Check:         checkPictures,
 		Collections:   true,
 	},
 	{
@@ -234,12 +236,12 @@ var All = []*Platform{
 		Limits:        map[string]Limits{"video": bjhVideoLimits, "article": bjhArticleLimits},
 	},
 	{
-		ID: "toutiao", Name: "头条号", Kinds: videoText,
+		ID: "toutiao", Name: "头条号", Kinds: article,
 		HomeURL: "https://mp.toutiao.com/profile_v4/index",
 		Cookie:  "sessionid", CookieDomain: "toutiao.com",
 		CookieDomains: []string{"toutiao.com"},
 		Publish:       publishToutiao,
-		Limits:        map[string]Limits{"video": ttVideoLimits, "article": ttPostLimits},
+		Limits:        map[string]Limits{"article": ttPostLimits},
 	},
 	{
 		ID: "weibo", Name: "微博", Kinds: videoText,

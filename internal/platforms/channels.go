@@ -26,6 +26,9 @@ const chRoot = `document.querySelector("wujie-app")?.shadowRoot`
 // title also leads the description. Selectors as of November 2026.
 func publishWeixinChannels(ctx context.Context, b *browser.Browser, j Job) error {
 	m := j.Material
+	if m.Kind == store.KindArticle {
+		return chImages(ctx, b, j)
+	}
 	page, err := openForm(ctx, b, "https://channels.weixin.qq.com/platform/post/create", j)
 	if err != nil {
 		return err
@@ -43,20 +46,8 @@ func publishWeixinChannels(ctx context.Context, b *browser.Browser, j Job) error
 	if !strings.Contains(text, strings.TrimSpace(m.Title)) {
 		text = strings.TrimSpace(m.Title + "\n" + text)
 	}
-	if err := typeInto(page, editor, channelsLimits.fitText(text, m.Tags)+" "); err != nil {
+	if err := chDescribe(ctx, page, editor, channelsLimits.fitText(text, m.Tags), m.Tags); err != nil {
 		return err
-	}
-	for i, tag := range m.Tags {
-		if i == channelsLimits.Tags {
-			break
-		}
-		// A space after "#话题" turns it into a topic.
-		if err := typeInto(page, editor, "#"+tag+" "); err != nil {
-			return err
-		}
-		if err := sleep(ctx, 500*time.Millisecond); err != nil {
-			return err
-		}
 	}
 
 	if short := shortTitle(m.Title); short != "" {
@@ -70,11 +61,8 @@ func publishWeixinChannels(ctx context.Context, b *browser.Browser, j Job) error
 		}
 	}
 
-	if j.Collection != "" {
-		j.Report("添加到合集")
-		if err := chCollection(ctx, page, j.Collection); err != nil {
-			return err
-		}
+	if err := chFillCollection(ctx, page, j); err != nil {
+		return err
 	}
 
 	if err := chUploaded(ctx, page, j); err != nil {
@@ -92,11 +80,161 @@ func publishWeixinChannels(ctx context.Context, b *browser.Browser, j Job) error
 		j.Report("已填写完成，请在浏览器中检查后点「发表」" + note)
 		return nil
 	}
+	return chSubmit(ctx, page, j, note)
+}
+
+// chImages posts an article as a picture post (图文, 发表动态): its
+// pictures, cover first, up to 18, a title of up to 22 characters, and
+// the body's paragraphs as the description, its tags as topics. Channels
+// picks background music for the pictures itself; that is left.
+func chImages(ctx context.Context, b *browser.Browser, j Job) error {
+	m := j.Material
+	page, err := openForm(ctx, b, "https://channels.weixin.qq.com/platform/post/finderNewLifeCreate", j)
+	if err != nil {
+		return err
+	}
+	images := noteImages(m)
+	if len(images) > chImagesMax {
+		images = images[:chImagesMax]
+	}
+	j.Report("上传图片")
+	const sel = `input[type="file"][accept^="image"]`
+	if _, err := chWait(ctx, page, sel); err != nil {
+		return err
+	}
+	// The widget ignores files given before its script is ready.
+	if err := sleep(ctx, 2*time.Second); err != nil {
+		return err
+	}
+	in, err := chFind(page, sel, 10*time.Second)
+	if err != nil {
+		return err
+	}
+	if err := in.SetFiles(images); err != nil {
+		return err
+	}
+
+	j.Report("填写标题")
+	title, err := chWait(ctx, page, `input[placeholder^="填写标题"]`)
+	if err != nil {
+		return err
+	}
+	if err := fill(page, title, fitTitle(m.Title, channelsImageLimits.Title)); err != nil {
+		return err
+	}
+	j.Report("填写描述和话题")
+	editor, err := chWait(ctx, page, `.input-editor[contenteditable]`)
+	if err != nil {
+		return err
+	}
+	text := m.Description
+	if text == "" {
+		text = paragraphs(articleBody(m))
+	}
+	if err := chDescribe(ctx, page, editor, channelsImageLimits.fitText(strings.TrimSpace(text), m.Tags), m.Tags); err != nil {
+		return err
+	}
+	if err := chFillCollection(ctx, page, j); err != nil {
+		return err
+	}
+	if err := chImagesUploaded(ctx, page, len(images)); err != nil {
+		return err
+	}
+	j.Report("位置设为不显示")
+	if err := chNoLocation(ctx, page); err != nil {
+		return err
+	}
+	if j.Mode == store.ModeReview {
+		j.Report("已填写完成，请在浏览器中检查后点「发表」")
+		return nil
+	}
+	return chSubmit(ctx, page, j, "")
+}
+
+// chImagesMax is the most pictures a picture post takes.
+const chImagesMax = 18
+
+// chImagesUploaded waits until the form lists n pictures and none is
+// still uploading, which leaves 发表 disabled.
+func chImagesUploaded(ctx context.Context, page *rod.Page, n int) error {
+	var watch uploadWatch
+	for deadline := time.Now().Add(3 * time.Minute); ; {
+		res, err := page.Timeout(evalTimeout).Eval(`() => {
+			const root = ` + chRoot + `;
+			const submit = [...(root?.querySelectorAll("button") ?? [])].find((b) => b.textContent.trim() === "发表");
+			const thumbs = [...(root?.querySelectorAll(".post-img-list-wrap .thumb-item") ?? [])];
+			return {
+				count: thumbs.length,
+				busy: thumbs.some((t) => t.querySelector("[class*=loading], [class*=progress]")) || !submit || submit.className.includes("disabled"),
+				text: root?.querySelector("body")?.innerText ?? "",
+			};
+		}`)
+		if err == nil {
+			v := res.Value
+			if err := watch.check(page, v.Get("text").Str()); err != nil {
+				return err
+			}
+			if v.Get("count").Int() >= n && !v.Get("busy").Bool() {
+				return nil
+			}
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("图片 3 分钟内没有全部上传成功（应为 %d 张）", n)
+		}
+		if err := sleep(ctx, time.Second); err != nil {
+			return err
+		}
+	}
+}
+
+// chDescribe types text into the description editor, then each tag as a
+// topic, up to Channels' 10. A topic ends at a symbol, so "#GPT-6.2" would
+// be #GPT-6 and a stray ".2"; such tags are left out.
+func chDescribe(ctx context.Context, page *rod.Page, editor *rod.Element, text string, tags []string) error {
+	if err := typeInto(page, editor, text+" "); err != nil {
+		return err
+	}
+	n := 0
+	for _, tag := range tags {
+		if n == channelsLimits.Tags {
+			break
+		}
+		if !chTopic.MatchString(tag) {
+			continue
+		}
+		n++
+		// A space after "#话题" turns it into a topic.
+		if err := typeInto(page, editor, "#"+tag+" "); err != nil {
+			return err
+		}
+		if err := sleep(ctx, 500*time.Millisecond); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// chTopic matches the tags that make whole topics.
+var chTopic = regexp.MustCompile(`^[\p{L}\p{N}_-]+$`)
+
+// chFillCollection adds the post to the job's collection, if it has one;
+// videos and picture posts share the account's collections.
+func chFillCollection(ctx context.Context, page *rod.Page, j Job) error {
+	if j.Collection == "" {
+		return nil
+	}
+	j.Report("添加到合集")
+	return chCollection(ctx, page, j.Collection)
+}
+
+// chSubmit clicks 发表 and waits for the post list.
+func chSubmit(ctx context.Context, page *rod.Page, j Job, note string) error {
 	j.Report("提交发表")
+	startNotes(page)
 	if err := chClick(ctx, page, "button", "^发表$", 10*time.Second); err != nil {
 		return err
 	}
-	if err := waitPublished(ctx, page, []string{"post/list"}, "发表成功"); err != nil {
+	if err := waitPublished(ctx, page, []string{"post/list", "finderNewLifePostList"}, "发表成功"); err != nil {
 		return err
 	}
 	return finish(page, j, "发表成功"+note)

@@ -352,7 +352,11 @@ export const Publisher = {
   delete(id: string): Promise<void> {
     return call("Publisher.Delete", id);
   },
-  /** MarkDone records that the user submitted a reviewed task themselves. */
+  /**
+   * MarkDone records that the user submitted a reviewed task themselves,
+   * or that a failed one went out after all, as when the platform's success
+   * message was missed.
+   */
   markDone(id: string): Promise<void> {
     return call("Publisher.MarkDone", id);
   },

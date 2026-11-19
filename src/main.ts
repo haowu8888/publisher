@@ -706,6 +706,7 @@ function taskActions(t: Task) {
   if (t.status === "review") b.push(`<button class="primary" data-done="${t.id}">我已提交</button>`);
   const gone = !state.materials.some((m) => m.id === t.materialId);
   if (t.shot) b.push(`<button data-shot="${t.id}" title="失败时页面的样子">截图</button>`);
+  if (t.status === "failed") b.push(`<button data-done="${t.id}" title="平台上其实已经发出去了">标为成功</button>`);
   if (!gone && (t.status === "failed" || t.status === "canceled" || t.status === "review"))
     b.push(`<button data-retry="${t.id}">重试</button>`);
   if (!busy(t)) b.push(`<button class="danger ghost" data-del-task="${t.id}">删除</button>`);
@@ -1192,7 +1193,18 @@ view.addEventListener("click", async (e) => {
   if (d.cancel) return void attempt(() => Publisher.cancel(d.cancel!));
   if (d.retry) return void attempt(() => Publisher.retry(d.retry!));
   if (d.shot) return void attempt(() => Publisher.openShot(d.shot!));
-  if (d.done) return void attempt(() => Publisher.markDone(d.done!));
+  if (d.done) {
+    const failed = state.tasks.find((t) => t.id === d.done)?.status === "failed";
+    if (
+      failed &&
+      !(await ask("只在平台上确实已经发出去时这样做：素材会显示为已发布，「重试失败的」也不会再发它。", {
+        title: "把这条失败的任务标为成功？",
+        ok: "标为成功",
+      }))
+    )
+      return;
+    return void attempt(() => Publisher.markDone(d.done!));
+  }
   if (d.delTask) {
     const waiting = state.tasks.find((t) => t.id === d.delTask)?.status === "review";
     const sure = waiting

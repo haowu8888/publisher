@@ -513,8 +513,12 @@ func waitPublishedFor(ctx context.Context, page *rod.Page, urlMarks []string, te
 	re := regexp.MustCompile(text)
 	startNotes(page)
 	said := false
+	// The success text may be on the page all along, as in Toutiao's hint
+	// 发布成功后，可额外获得图文创作收益, so only more of it counts.
+	seen := 0
 	if res, err := page.Timeout(evalTimeout).Eval(bodyText); err == nil {
 		said = loginLost.MatchString(res.Value.Str())
+		seen = len(re.FindAllString(res.Value.Str(), -1))
 	}
 	for deadline := time.Now().Add(wait); ; {
 		if info, err := page.Timeout(evalTimeout).Info(); err == nil {
@@ -531,7 +535,7 @@ func waitPublishedFor(ctx context.Context, page *rod.Page, urlMarks []string, te
 		}
 		if res, err := page.Timeout(evalTimeout).Eval(bodyText); err == nil {
 			body := res.Value.Str()
-			if re.MatchString(body) {
+			if len(re.FindAllString(body, -1)) > seen {
 				return nil
 			}
 			if !said && loginLost.MatchString(body) {

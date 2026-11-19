@@ -607,14 +607,24 @@ func (p *Publisher) Retry(id string) error { return p.queue.Retry(id) }
 // Cancel stops a running or pending task.
 func (p *Publisher) Cancel(id string) error { return p.queue.Cancel(id) }
 
-// MarkDone records that the user submitted a reviewed task themselves.
+// MarkDone records that the user submitted a reviewed task themselves,
+// or that a failed one went out after all, as when the platform's success
+// message was missed.
 func (p *Publisher) MarkDone(id string) error {
+	failed := false
 	t, err := p.store.UpdateTask(id, func(t *store.Task) {
-		if t.Status == store.StatusReview {
+		switch t.Status {
+		case store.StatusReview:
 			t.Status, t.Step = store.StatusSuccess, "已手动提交"
+		case store.StatusFailed:
+			failed = true
+			t.Status, t.Step, t.Error, t.Shot = store.StatusSuccess, "已手动标为成功", "", false
 		}
 	})
 	if err == nil {
+		if failed {
+			os.Remove(p.queue.ShotPath(id))
+		}
 		TaskUpdated.Broadcast(t)
 	}
 	return err
