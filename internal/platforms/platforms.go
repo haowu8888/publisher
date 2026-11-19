@@ -140,6 +140,10 @@ var (
 	// description.
 	qieLimits      = Limits{Title: 64}
 	qieVideoLimits = Limits{Title: 64, Text: 200}
+	// Sohu's video takes its topics apart from its description; its image
+	// posts (图文), which articles go out as, have no title.
+	sohuVideoLimits = Limits{Title: 500, Text: 300}
+	sohuPostLimits  = Limits{Text: 2000, Tags: 5}
 )
 
 var (
@@ -258,6 +262,15 @@ var All = []*Platform{
 		Check:         checkQie,
 		Publish:       publishQie,
 		Limits:        map[string]Limits{"video": qieVideoLimits, "article": qieLimits},
+	},
+	{
+		// ppinf is Sohu's passport sign-on, on sohu.com for all its sites.
+		ID: "sohu", Name: "搜狐视频", Kinds: videoText,
+		HomeURL: "https://tv.sohu.com/s/center/index.html#/",
+		Cookie:  "ppinf", CookieDomain: "sohu.com",
+		CookieDomains: []string{"sohu.com"},
+		Publish:       publishSohu,
+		Limits:        map[string]Limits{"video": sohuVideoLimits, "article": sohuPostLimits},
 	},
 }
 
