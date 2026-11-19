@@ -140,7 +140,7 @@ func qieTags(ctx context.Context, page *rod.Page, j Job) error {
 		return errors.New("未找到标签输入框")
 	}
 	for _, t := range tags {
-		if err := in.Focus(); err != nil {
+		if err := focus(in); err != nil {
 			return err
 		}
 		if err := page.InsertText(t); err != nil {

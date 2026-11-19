@@ -227,10 +227,8 @@ func (q *Queue) screenshot(id string) bool {
 		return false
 	}
 	page = page.Timeout(10 * time.Second)
-	// A background tab may not paint.
-	if _, err := page.Activate(); err != nil {
-		return false
-	}
+	// A background tab, or a minimized window, may not paint.
+	browser.Show(page)
 	quality := 70
 	img, err := page.Screenshot(false, &proto.PageCaptureScreenshot{Format: proto.PageCaptureScreenshotFormatJpeg, Quality: &quality})
 	if err != nil {

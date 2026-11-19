@@ -110,6 +110,7 @@ func wbChoose(ctx context.Context, page *rod.Page, path, startedSel string) erro
 		if err != nil {
 			return errors.New("未找到「上传视频」按钮")
 		}
+		browser.Show(page)
 		if err := btn.Click("left", 1); err != nil {
 			return err
 		}

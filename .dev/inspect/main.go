@@ -10,7 +10,9 @@
 // "cookies:<name,...>" prints the profile's cookies of those names, and
 // "close" closes the tab and "shadowclick:<host>|<selector>" clicks an
 // element in a host's shadow root, closed or not. "chooser:<selector>|<text>|<file>"
-// clicks an element and answers the file chooser it opens.
+// clicks an element and answers the file chooser it opens. "window" prints
+// the state of the tab's window (minimized, maximized...) and whether the
+// page is hidden; "window:<state>" sets the state first.
 //
 // A first argument starting with "http" opens a new tab; otherwise it picks
 // the open tab whose URL contains it.
@@ -58,6 +60,16 @@ func main() {
 		js, err := base64.StdEncoding.DecodeString(os.Args[2])
 		if err != nil {
 			panic(err)
+		}
+		if state, ok := strings.CutPrefix(string(js), "window"); ok && (state == "" || state[0] == ':') {
+			if state != "" {
+				if err := page.SetWindow(&proto.BrowserBounds{WindowState: proto.BrowserWindowState(state[1:])}); err != nil {
+					panic(err)
+				}
+			}
+			w := page.MustGetWindow()
+			fmt.Printf("state=%s bounds=%v,%v %vx%v visibility=%s\n", w.WindowState, *w.Left, *w.Top, *w.Width, *w.Height, page.MustEval(`() => document.visibilityState`).Str())
+			return
 		}
 		if string(js) == "close" {
 			page.MustClose()

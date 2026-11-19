@@ -72,3 +72,26 @@ func TestCheckDayu(t *testing.T) {
 		}
 	}
 }
+
+// TestIqiyiText drops what iQiyi's form turns down, emoji and other
+// symbols, and keeps Chinese, ASCII and the punctuation it takes.
+func TestIqiyiText(t *testing.T) {
+	for in, want := range map[string]string{
+		"把检索、模型串起来，好用但复杂 🔗":     "把检索、模型串起来，好用但复杂",
+		"《AI 词典》：过拟合？100% 讲清楚！": "《AI 词典》：过拟合？100% 讲清楚！",
+		"温度 30℃ → 很热 ✨\n第二行":    "温度 30  很热 \n第二行",
+	} {
+		if got := iqiyiText(in); got != want {
+			t.Errorf("iqiyiText(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+// TestMgtvTagLen counts ASCII as half a character, as Mango TV does.
+func TestMgtvTagLen(t *testing.T) {
+	for in, want := range map[string]float64{"AI": 1, "人工智能": 4, "LangChain": 4.5, "AI开发": 3} {
+		if got := mgtvTagLen(in); got != want {
+			t.Errorf("mgtvTagLen(%q) = %v, want %v", in, got, want)
+		}
+	}
+}

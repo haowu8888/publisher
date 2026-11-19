@@ -115,6 +115,26 @@ func (x *Browser) Page(url string) (*rod.Page, error) {
 	return page, err
 }
 
+// Show brings page's tab to the front, and its window back if minimized.
+func Show(page *rod.Page) {
+	page.Timeout(5 * time.Second).Activate()
+	Restore(page)
+}
+
+// Restore brings page's window back if minimized, maximized as the browser
+// starts. A minimized window does not paint, so its pages run no animation
+// frames: rod's waits for an element to keep still, as in Click, never end,
+// and some pages, such as Zhihu's upload page, do nothing meanwhile.
+// Covered by other windows, pages still run.
+func Restore(page *rod.Page) {
+	page = page.Timeout(5 * time.Second)
+	if w, err := page.GetWindow(); err == nil && w.WindowState == proto.BrowserWindowStateMinimized {
+		// Chrome takes a minimized window only back to normal first.
+		page.SetWindow(&proto.BrowserBounds{WindowState: proto.BrowserWindowStateNormal})
+		page.SetWindow(&proto.BrowserBounds{WindowState: proto.BrowserWindowStateMaximized})
+	}
+}
+
 // Last returns the tab Page opened last since ForgetLast, or nil.
 func (x *Browser) Last() *rod.Page {
 	x.mu.Lock()

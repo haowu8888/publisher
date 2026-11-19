@@ -144,6 +144,13 @@ var (
 	// posts (图文), which articles go out as, have no title.
 	sohuVideoLimits = Limits{Title: 500, Text: 300}
 	sohuPostLimits  = Limits{Text: 2000, Tags: 5}
+	// Mango TV takes its tags apart from its description.
+	mgtvLimits = Limits{Title: 30, Text: 250}
+	// iQiyi's video takes no tags.
+	iqiyiLimits = Limits{Title: 30, Text: 450}
+	// Zhihu takes its topics apart from the text, from suggestions.
+	zhihuVideoLimits   = Limits{Title: 50, Text: 1000}
+	zhihuArticleLimits = Limits{Title: 100}
 )
 
 var (
@@ -272,6 +279,34 @@ var All = []*Platform{
 		Publish:       publishSohu,
 		Limits:        map[string]Limits{"video": sohuVideoLimits, "article": sohuPostLimits},
 	},
+	{
+		// HDCN is Mango TV's sign-on, on mgtv.com for all its sites.
+		ID: "mgtv", Name: "芒果TV", Kinds: video,
+		HomeURL: "https://7.mgtv.com/dashboard",
+		Cookie:  "HDCN", CookieDomain: "mgtv.com",
+		CookieDomains: []string{"mgtv.com"},
+		Publish:       publishMgtv,
+		Check:         checkMgtv,
+		Limits:        map[string]Limits{"video": mgtvLimits},
+	},
+	{
+		// P00001 is iQiyi's passport ticket, on iqiyi.com for all its sites.
+		ID: "iqiyi", Name: "爱奇艺号", Kinds: video,
+		HomeURL: "https://creator.iqiyi.com/",
+		Cookie:  "P00001", CookieDomain: "iqiyi.com",
+		CookieDomains: []string{"iqiyi.com"},
+		Publish:       publishIqiyi,
+		Limits:        map[string]Limits{"video": iqiyiLimits},
+	},
+	{
+		// z_c0 is Zhihu's login ticket.
+		ID: "zhihu", Name: "知乎", Kinds: videoText,
+		HomeURL: "https://www.zhihu.com/creator",
+		Cookie:  "z_c0", CookieDomain: "zhihu.com",
+		CookieDomains: []string{"zhihu.com"},
+		Publish:       publishZhihu,
+		Limits:        map[string]Limits{"video": zhihuVideoLimits, "article": zhihuArticleLimits},
+	},
 }
 
 // Get returns the platform with id, or nil.
@@ -384,7 +419,7 @@ func (p *Platform) Login(ctx context.Context, b *browser.Browser) error {
 	if err != nil {
 		return err
 	}
-	page.Activate()
+	browser.Show(page)
 	// Waiting long for a QR code scan, so not with page.Context(ctx).
 	for {
 		if err := sleep(ctx, 2*time.Second); err != nil {
@@ -449,7 +484,7 @@ func sleep(ctx context.Context, d time.Duration) error {
 // fill replaces the text of an input, a textarea or a contenteditable
 // editor, as typing would.
 func fill(page *rod.Page, el *rod.Element, text string) error {
-	if err := el.Focus(); err != nil {
+	if err := focus(el); err != nil {
 		return err
 	}
 	if _, err := el.Eval(`() => {

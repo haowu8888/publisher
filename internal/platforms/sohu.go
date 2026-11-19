@@ -103,7 +103,7 @@ func sohuVideoTopics(ctx context.Context, page *rod.Page, j Job) error {
 			break
 		}
 		n += utf8.RuneCountInString(t)
-		if err := in.Focus(); err != nil {
+		if err := focus(in); err != nil {
 			return err
 		}
 		if err := page.InsertText(t); err != nil {
@@ -375,7 +375,7 @@ func sohuSubmit(ctx context.Context, page *rod.Page, j Job, text, note string) e
 	if err := clickVisible(ctx, page, ".form-button .button, span.button", text, 10*time.Second); err != nil {
 		return err
 	}
-	if err := waitPublished(ctx, page, []string{"#/manage", "#/works"}, "发布成功|提交成功"); err != nil {
+	if err := waitPublished(ctx, page, []string{"#/manage", "#/works", "#/video/list"}, "发布成功|提交成功"); err != nil {
 		return err
 	}
 	return finish(page, j, "发布成功"+note)

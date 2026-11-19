@@ -39,8 +39,14 @@ func openForm(ctx context.Context, b *browser.Browser, url string, j Job) (*rod.
 	if err != nil {
 		return nil, err
 	}
-	page.Activate()
+	browser.Show(page)
 	page = page.Context(ctx)
+	// A user may minimize the browser while the task runs; see Restore.
+	go func() {
+		for sleep(ctx, 3*time.Second) == nil {
+			browser.Restore(page)
+		}
+	}()
 	go page.EachEvent(func(e *proto.PageJavascriptDialogOpening) {
 		if e.Message != "" && e.Type != proto.PageDialogTypeBeforeunload {
 			j.Report("页面提示：" + e.Message)
@@ -317,6 +323,8 @@ func mouseClick(ctx context.Context, page *rod.Page, sel, text string, wait time
 			return [...document.querySelectorAll(sel)].find((e) => e.getClientRects().length && re.test(e.textContent.trim())) ?? null;
 		}`, sel, text))
 		if err == nil {
+			// A real click waits for animation frames, as focus says.
+			browser.Show(page)
 			return el.CancelTimeout().Sleeper(rod.DefaultSleeper).Timeout(evalTimeout).Click("left", 1)
 		}
 		if time.Now().After(deadline) {
@@ -438,10 +446,19 @@ func dismissGuides(page *rod.Page) {
 	})`)
 }
 
+// focus focuses el by script. rod's Focus first waits for el to keep
+// still over a few animation frames, which a page in a minimized window
+// never runs, so a task would wait for ever once the user minimized the
+// browser.
+func focus(el *rod.Element) error {
+	_, err := el.Eval(`() => this.focus()`)
+	return err
+}
+
 // typeInto appends text at the end of a contenteditable editor, as typing
 // would.
 func typeInto(page *rod.Page, editor *rod.Element, text string) error {
-	if err := editor.Focus(); err != nil {
+	if err := focus(editor); err != nil {
 		return err
 	}
 	if _, err := editor.Eval(`() => {
@@ -460,7 +477,7 @@ func typeInto(page *rod.Page, editor *rod.Element, text string) error {
 // pasteHTML pastes rich text into an editor, which keeps headings, lists
 // and the like where typing would not.
 func pasteHTML(editor *rod.Element, htmlText, plain string) error {
-	if err := editor.Focus(); err != nil {
+	if err := focus(editor); err != nil {
 		return err
 	}
 	_, err := editor.Eval(`(html, plain) => {
@@ -506,6 +523,11 @@ func waitPublishedFor(ctx context.Context, page *rod.Page, urlMarks []string, te
 					return nil
 				}
 			}
+		}
+		// A success dialog may come and go between two looks, as Sohu's
+		// does before it shows the video list.
+		if res, err := page.Timeout(evalTimeout).Eval(`() => (window.__pubNotes?.notes || []).join("\n")`); err == nil && re.MatchString(res.Value.Str()) {
+			return nil
 		}
 		if res, err := page.Timeout(evalTimeout).Eval(bodyText); err == nil {
 			body := res.Value.Str()

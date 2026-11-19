@@ -148,7 +148,7 @@ func dayuTags(ctx context.Context, page *rod.Page, tags []string) error {
 		if err != nil {
 			return errors.New("未找到视频标签输入框")
 		}
-		if err := in.CancelTimeout().Focus(); err != nil {
+		if err := focus(in.CancelTimeout()); err != nil {
 			return err
 		}
 		if err := page.InsertText(t); err != nil {
