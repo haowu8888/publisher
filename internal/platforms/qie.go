@@ -58,7 +58,7 @@ func qieVideo(ctx context.Context, b *browser.Browser, j Job) error {
 		return err
 	}
 	dismissGuides(page)
-	if err := qieFillTitle(page, m.Title); err != nil {
+	if err := qieFillTitle(ctx, page, m.Title); err != nil {
 		return err
 	}
 	if m.Description != "" {
@@ -94,13 +94,26 @@ func qieVideo(ctx context.Context, b *browser.Browser, j Job) error {
 	return qieSubmit(ctx, page, j, note)
 }
 
-// qieFillTitle fills the title box with the material's title.
-func qieFillTitle(page *rod.Page, title string) error {
+// qieFillTitle fills the title box with the material's title. The box
+// tells the form of a change only when its text differs from what it last
+// had, 300 ms after typing stops, and after 撤销 it still has the autosaved
+// title while the form's is empty: the same article again would leave the
+// form without a title (请输入5至64个字的标题). So it is emptied first.
+func qieFillTitle(ctx context.Context, page *rod.Page, title string) error {
 	el, err := find(page, qieTitle, 10*time.Second)
 	if err != nil {
 		return errors.New("未找到标题输入框")
 	}
+	if err := fill(page, el, ""); err != nil {
+		return err
+	}
+	if err := sleep(ctx, 600*time.Millisecond); err != nil {
+		return err
+	}
 	if err := fill(page, el, fitTitle(title, qieLimits.Title)); err != nil {
+		return err
+	}
+	if err := sleep(ctx, 600*time.Millisecond); err != nil {
 		return err
 	}
 	if res, err := el.Eval(`() => this.textContent.trim()`); err != nil || res.Value.Str() == "" {
@@ -159,25 +172,20 @@ func qieStatement(ctx context.Context, page *rod.Page, statement string) error {
 	if !ok {
 		return nil
 	}
-	// The form may keep the statement made last time, which 撤销 leaves.
-	res, err := page.Timeout(evalTimeout).Eval(`async (s) => {
-		const g = document.querySelector('[id$="-selfDeclaration"]');
-		const said = g?.textContent.match(/作者声明：([^如]*)/)?.[1].trim();
-		if (!said || said === s) return !!said;
-		g.querySelector(".omui-contentbutton__remove")?.click();
-		await new Promise((r) => setTimeout(r, 500));
-		return false;
-	}`, s)
-	if err != nil {
+	// The form may show the statement made last time, which 撤销 leaves: it
+	// is only shown, and 发布 asks for one (请选择自主声明), so it is made anew.
+	if _, err := page.Timeout(evalTimeout).Eval(`async () => {
+		const remove = document.querySelector('[id$="-selfDeclaration"] .omui-contentbutton__remove');
+		if (!remove) return;
+		remove.click();
+		await new Promise((r) => setTimeout(r, 800));
+	}`); err != nil {
 		return err
-	}
-	if res.Value.Bool() {
-		return nil
 	}
 	if err := clickVisible(ctx, page, `[id$="-selfDeclaration"] button`, `^添加内容自主声明$`, 5*time.Second); err != nil {
 		return err
 	}
-	res, err = page.Timeout(evalTimeout).Eval(`async (s) => {
+	res, err := page.Timeout(evalTimeout).Eval(`async (s) => {
 		const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 		// The dialog shows a while before its choices.
 		let d, radio;
@@ -406,7 +414,7 @@ func qieArticle(ctx context.Context, b *browser.Browser, j Job) error {
 		return err
 	}
 	dismissGuides(page)
-	if err := qieFillTitle(page, m.Title); err != nil {
+	if err := qieFillTitle(ctx, page, m.Title); err != nil {
 		return err
 	}
 	content, err := inlineImages(spreadImages(markdownHTML(articleBody(m)), bodyImages(m)), articleDirs(m)...)
@@ -444,11 +452,42 @@ func qieArticle(ctx context.Context, b *browser.Browser, j Job) error {
 	if err := qieAIMark(ctx, page, m.Statement == qieAI); err != nil {
 		return err
 	}
+	if err := qieKeepSingle(ctx, page, m.CoverPath != ""); err != nil {
+		return fmt.Errorf("设置封面失败: %w", err)
+	}
 	if j.Mode == store.ModeReview {
 		j.Report(reviewNote)
 		return nil
 	}
 	return qieSubmit(ctx, page, j, "")
+}
+
+// qieKeepSingle turns the cover back to 单图 when the form has turned it
+// to 三图: it does so by itself a while after the body's pictures are
+// stored, once there are three, over the cover set, and may leave a box
+// empty (请完成三图封面设置). An own cover is kept single in any case; it
+// is the single cover again once picked.
+func qieKeepSingle(ctx context.Context, page *rod.Page, own bool) error {
+	res, err := page.Timeout(evalTimeout).Eval(`async (own) => {
+		const c = document.querySelector('[id$="-coverinfo"]');
+		const radios = c ? [...c.querySelectorAll("label.omui-radio")] : [];
+		const checked = () => radios.find((l) => l.querySelector("input")?.checked)?.textContent.trim();
+		if (checked() !== "三图") return "";
+		if (!own && c.querySelectorAll("img.omui-thumb__img").length >= 3) return "";
+		radios.find((l) => l.textContent.trim() === "单图")?.click();
+		await new Promise((r) => setTimeout(r, 800));
+		return checked() === "单图" ? "" : "封面没能改回单图";
+	}`, own)
+	if err != nil {
+		return err
+	}
+	if msg := res.Value.Str(); msg != "" {
+		return errors.New(msg)
+	}
+	if own {
+		return qieCoverShown(ctx, page, `[id$="-coverinfo"] img.omui-thumb__img`)
+	}
+	return nil
 }
 
 // qieDropCache undoes the editor's autosave. The editor keeps what was
