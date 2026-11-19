@@ -502,7 +502,8 @@ func finish(page *rod.Page, j Job, step string) error {
 var loginLost = regexp.MustCompile(`登[录陆](已)?(失效|过期)|请重新登[录陆]`)
 
 // waitPublished waits for a page to show that a submit worked: its URL
-// gaining one of urlMarks, or a text matching the regular expression text.
+// gaining one of urlMarks (one ending in $ must end its path), or a text
+// matching the regular expression text.
 // It gives up early when the page starts saying the login is gone.
 func waitPublished(ctx context.Context, page *rod.Page, urlMarks []string, text string) error {
 	return waitPublishedFor(ctx, page, urlMarks, text, 90*time.Second)
@@ -522,8 +523,10 @@ func waitPublishedFor(ctx context.Context, page *rod.Page, urlMarks []string, te
 	}
 	for deadline := time.Now().Add(wait); ; {
 		if info, err := page.Timeout(evalTimeout).Info(); err == nil {
+			path, _, _ := strings.Cut(info.URL, "?")
+			path, _, _ = strings.Cut(path, "#")
 			for _, m := range urlMarks {
-				if strings.Contains(info.URL, m) {
+				if end, ok := strings.CutSuffix(m, "$"); ok && strings.HasSuffix(path, end) || !ok && strings.Contains(info.URL, m) {
 					return nil
 				}
 			}

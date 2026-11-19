@@ -169,7 +169,10 @@ func ttSubmit(ctx context.Context, page *rod.Page, j Job) error {
 			return err
 		}
 	}
-	if err := waitPublished(ctx, page, []string{"/manage", "/content"}, "发布成功|提交成功"); err != nil {
+	// A posted 微头条 goes to the list of them, profile_v4/weitoutiao,
+	// whose URL the form's (…/weitoutiao/publish) contains, so it must end
+	// it; a dialog asking to sync works to other apps may cover the list.
+	if err := waitPublished(ctx, page, []string{"/manage", "/content", "/weitoutiao$"}, "发布成功|提交成功"); err != nil {
 		return err
 	}
 	return finish(page, j, "发布成功")

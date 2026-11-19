@@ -283,12 +283,30 @@ func bjhArticle(ctx context.Context, b *browser.Browser, j Job) error {
 	}
 	j.Report("填写标题和正文")
 	const titleSel = `[data-testid="news-title-input"] [data-lexical-editor]`
-	title, err := waitElement(ctx, page, titleSel, "builder/rc/edit")
-	if err != nil {
+	if _, err := waitElement(ctx, page, titleSel, "builder/rc/edit"); err != nil {
 		return err
 	}
 	dismissGuides(page)
-	if err := fill(page, title, fitTitle(m.Title, bjhArticleLimits.Title)); err != nil {
+	// The title shows a while before the body's editor loads, and is
+	// emptied when it does; setContent throws until its document exists.
+	for deadline := time.Now().Add(30 * time.Second); ; {
+		res, err := page.Timeout(evalTimeout).Eval(`() => !!Object.values(window.UE_V2?.instants || {})[0]?.body`)
+		if err == nil && res.Value.Bool() {
+			break
+		}
+		if time.Now().After(deadline) {
+			return errors.New("正文编辑器没有加载出来")
+		}
+		if err := sleep(ctx, 500*time.Millisecond); err != nil {
+			return err
+		}
+	}
+	titleText := fitTitle(m.Title, bjhArticleLimits.Title)
+	title, err := find(page, titleSel, 10*time.Second)
+	if err != nil {
+		return err
+	}
+	if err := fill(page, title, titleText); err != nil {
 		return err
 	}
 	content, err := inlineImages(spreadImages(markdownHTML(articleBody(m)), bodyImages(m)), articleDirs(m)...)
@@ -322,6 +340,14 @@ func bjhArticle(ctx context.Context, b *browser.Browser, j Job) error {
 		}
 	case j.Mode == store.ModeAuto:
 		return errBjhNoCover
+	}
+	// Should the form have emptied the title again, fill it once more.
+	if res, err := page.Timeout(evalTimeout).Eval(`(sel) => document.querySelector(sel)?.innerText.trim() ?? ""`, titleSel); err == nil && res.Value.Str() == "" {
+		if title, err := find(page, titleSel, 10*time.Second); err == nil {
+			if err := fill(page, title, titleText); err != nil {
+				return err
+			}
+		}
 	}
 	if j.Mode == store.ModeReview {
 		if m.CoverPath == "" && pics == 0 {
