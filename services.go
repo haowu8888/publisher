@@ -589,7 +589,10 @@ func (a *Accounts) importCookies(cookies []cookiesync.Cookie) (any, error) {
 }
 
 // CloseBrowser quits the automation browser.
-func (a *Accounts) CloseBrowser() { a.browser.Close() }
+func (a *Accounts) CloseBrowser() {
+	platforms.KeepSessions(a.browser)
+	a.browser.Close()
+}
 
 // Publisher queues and tracks publish tasks.
 type Publisher struct {

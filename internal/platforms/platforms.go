@@ -69,6 +69,10 @@ type Platform struct {
 	// LoginNote, when set, says why the platform's login cannot be copied
 	// from the user's Chrome; the user scans a QR code in the app instead.
 	LoginNote string `json:"loginNote,omitempty"`
+	// KeepSession is for a platform whose login cookies are session
+	// cookies, which Chrome drops when it quits, as it does after the
+	// schedule's tasks: KeepSessions makes them last.
+	KeepSession bool `json:"-"`
 	// Check refuses a material the platform cannot publish in mode before
 	// any of it is uploaded.
 	Check func(m store.Material, mode store.Mode) error `json:"-"`
@@ -152,6 +156,13 @@ var (
 	// Zhihu takes its topics apart from the text, from suggestions.
 	zhihuVideoLimits   = Limits{Title: 50, Text: 1000}
 	zhihuArticleLimits = Limits{Title: 100}
+	// NetEase's video takes no description, and its tags apart; its
+	// articles have no tags.
+	neteaseLimits = Limits{Title: 64}
+	// Yidian's video takes its tags apart from its description; its
+	// articles have no tags.
+	yidianVideoLimits   = Limits{Title: 30, Text: 200}
+	yidianArticleLimits = Limits{Title: 64}
 )
 
 var (
@@ -309,6 +320,30 @@ var All = []*Platform{
 		Publish:       publishZhihu,
 		Limits:        map[string]Limits{"video": zhihuVideoLimits, "article": zhihuArticleLimits},
 	},
+	{
+		// Its login cookie depends on how the user signed in (NTES_SESS,
+		// NTES_YD_SESS), so the login is told from the creator center,
+		// which sends a visitor to login.html. Both are session cookies.
+		ID: "netease", Name: "网易号", Kinds: videoText,
+		HomeURL:       "https://mp.163.com/subscribe_v4/index.html#/home",
+		LoginMark:     "login.html",
+		CookieDomains: []string{"163.com"},
+		KeepSession:   true,
+		Publish:       publishNetease,
+		Check:         checkNetease,
+		Limits:        map[string]Limits{"video": neteaseLimits, "article": neteaseLimits},
+	},
+	{
+		// The creator center shows its sign-up page in place to a visitor,
+		// who gets no JSESSIONID.
+		ID: "yidian", Name: "一点号", Kinds: videoText,
+		HomeURL: "https://mp.yidianzixun.com/",
+		Cookie:  "JSESSIONID", CookieDomain: "yidianzixun.com",
+		CookieDomains: []string{"yidianzixun.com"},
+		Publish:       publishYidian,
+		Check:         checkYidian,
+		Limits:        map[string]Limits{"video": yidianVideoLimits, "article": yidianArticleLimits},
+	},
 }
 
 // Get returns the platform with id, or nil.
@@ -375,6 +410,14 @@ func (p *Platform) landedLoggedIn(pageURL string) bool {
 
 // CheckLogin reports whether the browser profile is logged in to p.
 func (p *Platform) CheckLogin(ctx context.Context, b *browser.Browser) (bool, error) {
+	ok, err := p.checkLogin(ctx, b)
+	if ok && p.KeepSession {
+		KeepSessions(b)
+	}
+	return ok, err
+}
+
+func (p *Platform) checkLogin(ctx context.Context, b *browser.Browser) (bool, error) {
 	if p.Cookie != "" && p.LoginText == "" {
 		rb, err := b.Get()
 		if err != nil {
@@ -443,9 +486,56 @@ func (p *Platform) Login(ctx context.Context, b *browser.Browser) error {
 		}
 		if ok {
 			page.Close()
+			if p.KeepSession {
+				KeepSessions(b)
+			}
 			return nil
 		}
 	}
+}
+
+// sessionKeep is how long KeepSessions makes session cookies last. Each
+// login check and each task renews it; the server may end the session
+// sooner, which the login check sees.
+const sessionKeep = 30 * 24 * time.Hour
+
+// KeepSessions gives the session cookies of the platforms with KeepSession
+// an expiry, so that they outlive the browser. It does nothing when the
+// browser is not running.
+func KeepSessions(b *browser.Browser) error {
+	cookies, err := b.Cookies()
+	if err != nil {
+		return err
+	}
+	return b.SetCookies(lasting(cookies, time.Now().Add(sessionKeep)))
+}
+
+// lasting returns the session cookies of the platforms with KeepSession,
+// set to expire at until.
+func lasting(cookies []*proto.NetworkCookie, until time.Time) []*proto.NetworkCookieParam {
+	var out []*proto.NetworkCookieParam
+	for _, c := range cookies {
+		if !c.Session || !slices.ContainsFunc(All, func(p *Platform) bool { return p.KeepSession && p.Owns(c.Domain) }) {
+			continue
+		}
+		p := &proto.NetworkCookieParam{
+			Name: c.Name, Value: c.Value, Path: c.Path,
+			Secure: c.Secure, HTTPOnly: c.HTTPOnly, SameSite: c.SameSite, Priority: c.Priority,
+			Expires: proto.TimeSinceEpoch(until.Unix()),
+		}
+		if strings.HasPrefix(c.Domain, ".") {
+			p.Domain = c.Domain
+		} else {
+			// A host-only cookie: giving only the URL keeps it so.
+			scheme := "http://"
+			if c.Secure {
+				scheme = "https://"
+			}
+			p.URL = scheme + c.Domain + c.Path
+		}
+		out = append(out, p)
+	}
+	return out
 }
 
 // logout deletes p's cookies from the browser profile.

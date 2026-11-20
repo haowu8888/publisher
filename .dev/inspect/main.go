@@ -94,7 +94,13 @@ func main() {
 			fmt.Println("chosen", files)
 			return
 		}
-		if names, ok := strings.CutPrefix(string(js), "cookies:"); ok {
+		if arg, ok := strings.CutPrefix(string(js), "frame:"); ok {
+			// "frame:<iframe selector>|<js>" runs <js> in the iframe, which
+			// may be on another site, as NetEase's login box.
+			sel, code, _ := strings.Cut(arg, "|")
+			f := page.MustElement(sel).MustFrame()
+			fmt.Println(f.MustEval(`async () => { const r = await (` + code + `); return r === undefined ? null : r }`).String())
+		} else if names, ok := strings.CutPrefix(string(js), "cookies:"); ok {
 			for _, c := range b.MustGetCookies() {
 				if strings.Contains(","+names+",", ","+c.Name+",") {
 					fmt.Printf("%s domain=%s path=%s expires=%s len=%d httpOnly=%v\n", c.Name, c.Domain, c.Path,

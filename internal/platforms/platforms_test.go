@@ -2,6 +2,9 @@ package platforms
 
 import (
 	"testing"
+	"time"
+
+	"github.com/go-rod/rod/lib/proto"
 
 	"publisher/internal/store"
 )
@@ -101,5 +104,50 @@ func TestChTopic(t *testing.T) {
 		if got := chTopic.MatchString(tag); got != want {
 			t.Errorf("chTopic(%q) = %v, want %v", tag, got, want)
 		}
+	}
+}
+
+// TestNeHeading makes headings h5, the only one NetEase's editor has.
+func TestNeHeading(t *testing.T) {
+	in := "<h1>一</h1>\n<h2>二</h2>\n<h5>五</h5>\n<h6>六</h6>\n<p>正文</p>"
+	want := "<h5>一</h5>\n<h5>二</h5>\n<h5>五</h5>\n<h5>六</h5>\n<p>正文</p>"
+	if got := neHeading.ReplaceAllString(in, "<${1}h5>"); got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+// TestCheckTitleMin refuses, ahead of the form, titles NetEase and Yidian
+// turn down as too short when submitted by themselves.
+func TestCheckTitleMin(t *testing.T) {
+	for name, check := range map[string]func(store.Material, store.Mode) error{"netease": checkNetease, "yidian": checkYidian} {
+		short := store.Material{Kind: store.KindArticle, Title: "四个字的"}
+		if check(short, store.ModeAuto) == nil {
+			t.Errorf("%s: a 4-character title passed", name)
+		}
+		if err := check(short, store.ModeReview); err != nil {
+			t.Errorf("%s: review refused: %v", name, err)
+		}
+		if err := check(store.Material{Kind: store.KindVideo, Title: "五个字标题"}, store.ModeAuto); err != nil {
+			t.Errorf("%s: a 5-character title refused: %v", name, err)
+		}
+	}
+}
+
+func TestLasting(t *testing.T) {
+	until := time.Unix(1900000000, 0)
+	got := lasting([]*proto.NetworkCookie{
+		{Name: "NTES_SESS", Value: "v", Domain: ".163.com", Path: "/", Session: true, HTTPOnly: true},
+		{Name: "a", Value: "v", Domain: "mp.163.com", Path: "/", Session: true, Secure: true},
+		{Name: "P_INFO", Value: "v", Domain: ".163.com", Path: "/", Expires: 1800000000},
+		{Name: "SESSDATA", Value: "v", Domain: ".bilibili.com", Path: "/", Session: true},
+	}, until)
+	if len(got) != 2 {
+		t.Fatalf("got %d cookies, want the 2 session cookies of 163.com", len(got))
+	}
+	if got[0].Domain != ".163.com" || got[0].Expires != 1900000000 || !got[0].HTTPOnly {
+		t.Errorf("domain cookie: %+v", got[0])
+	}
+	if got[1].Domain != "" || got[1].URL != "https://mp.163.com/" {
+		t.Errorf("host-only cookie: %+v", got[1])
 	}
 }

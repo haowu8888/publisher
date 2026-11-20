@@ -155,6 +155,8 @@ func (q *Queue) loop() {
 			if failed := q.run(t); failed || t.Mode == store.ModeReview {
 				keep = true
 			}
+			// The task's pages may have renewed the session cookies.
+			platforms.KeepSessions(q.browser)
 		}
 		if opened && ran && !keep && !q.store.Settings().KeepBrowser {
 			q.browser.Close()

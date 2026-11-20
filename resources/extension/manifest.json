@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Publisher 登录同步",
-  "version": "0.3.9",
+  "version": "0.3.10",
   "description": "把本浏览器里各发布平台的登录状态同步到 Publisher 桌面应用。",
   "permissions": ["cookies"],
   "host_permissions": [
@@ -20,7 +20,9 @@
     "*://*.sohu.com/*",
     "*://*.mgtv.com/*",
     "*://*.iqiyi.com/*",
-    "*://*.zhihu.com/*"
+    "*://*.zhihu.com/*",
+    "*://*.163.com/*",
+    "*://*.yidianzixun.com/*"
   ],
   "action": {
     "default_title": "同步登录到 Publisher",

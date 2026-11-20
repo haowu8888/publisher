@@ -161,6 +161,17 @@ func (x *Browser) Cookies() ([]*proto.NetworkCookie, error) {
 	return b.Timeout(10 * time.Second).GetCookies()
 }
 
+// SetCookies sets cookies, unless the browser is not running.
+func (x *Browser) SetCookies(cookies []*proto.NetworkCookieParam) error {
+	x.mu.Lock()
+	b := x.b
+	x.mu.Unlock()
+	if b == nil || len(cookies) == 0 {
+		return nil
+	}
+	return b.Timeout(10 * time.Second).SetCookies(cookies)
+}
+
 // Running reports whether the browser was launched and is still open.
 func (x *Browser) Running() bool {
 	x.mu.Lock()
