@@ -24,6 +24,7 @@ import (
 	"github.com/go-rod/rod/lib/proto"
 	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/extension"
+	gmhtml "github.com/yuin/goldmark/renderer/html"
 )
 
 // openForm opens a platform's publish page in a new tab, brought to the
@@ -421,6 +422,60 @@ func waitGone(ctx context.Context, page *rod.Page, sel string, wait time.Duratio
 	}
 }
 
+// clearMarker deletes the marker paragraph reading mark from the editor
+// sel, as a user would, leaving the cursor where it was: for editors that
+// keep their own selection, which a script's does not change. Its line is
+// clicked and selected with End and Shift+Home, and deleted only when the
+// selection is the marker: a picture above still loading moves the text,
+// and the click can land on a long paragraph's line instead.
+func clearMarker(ctx context.Context, page *rod.Page, sel, mark string) error {
+	for try := 0; ; try++ {
+		// Pictures still loading change the layout.
+		for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); {
+			res, err := page.Timeout(evalTimeout).Eval(`(sel) => [...document.querySelectorAll(sel + " img")].every((i) => i.complete)`, sel)
+			if err == nil && res.Value.Bool() {
+				break
+			}
+			if err := sleep(ctx, 500*time.Millisecond); err != nil {
+				return err
+			}
+		}
+		el, err := findR(page, sel+` span[data-text]`, regexp.QuoteMeta(mark), 10*time.Second)
+		if err != nil {
+			return fmt.Errorf("正文里找不到%s", mark)
+		}
+		browser.Show(page)
+		if err := el.ScrollIntoView(); err != nil {
+			return err
+		}
+		if err := sleep(ctx, 300*time.Millisecond); err != nil {
+			return err
+		}
+		if err := el.Click(proto.InputMouseButtonLeft, 1); err != nil {
+			return err
+		}
+		if err := page.Keyboard.Type(input.End); err != nil {
+			return err
+		}
+		if err := page.KeyActions().Press(input.ShiftLeft).Type(input.Home).Release(input.ShiftLeft).Do(); err != nil {
+			return err
+		}
+		res, err := page.Timeout(evalTimeout).Eval(`() => getSelection().toString().trim()`)
+		if err != nil {
+			return err
+		}
+		if res.Value.Str() == mark {
+			return page.Keyboard.Type(input.Backspace)
+		}
+		if try == 2 {
+			return fmt.Errorf("选不中正文里的%s", mark)
+		}
+		if err := sleep(ctx, time.Second); err != nil {
+			return err
+		}
+	}
+}
+
 // setCover puts the material's cover, if it has one, on a video's form
 // with set. A cover that cannot be set is no reason not to publish: the
 // platform then takes a frame of the video, as it does without a cover,
@@ -632,7 +687,10 @@ func pageNotes(page *rod.Page) string {
 	return res.Value.Str()
 }
 
-var md = goldmark.New(goldmark.WithExtensions(extension.GFM))
+// md keeps each line of a paragraph on its own line, as the author's
+// editor shows it: lines such as `\- 估值：…`, list items escaped, would
+// otherwise run together.
+var md = goldmark.New(goldmark.WithExtensions(extension.GFM), goldmark.WithRendererOptions(gmhtml.WithHardWraps()))
 
 // markdownHTML renders an article's Markdown body.
 func markdownHTML(src string) string {

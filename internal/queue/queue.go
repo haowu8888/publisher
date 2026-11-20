@@ -302,6 +302,7 @@ func (q *Queue) publish(ctx context.Context, t store.Task) error {
 		Mode:       t.Mode,
 		Collection: st.Collection(m, p.ID),
 		Original:   st.Original,
+		Quote:      st.Quote,
 		Report: func(step string) {
 			q.update(t.ID, func(t *store.Task) { t.Step = step })
 		},

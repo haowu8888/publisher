@@ -13,7 +13,6 @@ import (
 
 	"github.com/go-rod/rod"
 	"github.com/go-rod/rod/lib/input"
-	"github.com/go-rod/rod/lib/proto"
 )
 
 // publishZhihu publishes on Zhihu (知乎): a video (视频), or an article as a
@@ -462,21 +461,7 @@ func zhBody(ctx context.Context, page *rod.Page, j Job, editor *rod.Element, con
 		i++
 		j.Report(fmt.Sprintf("上传正文图片 %d/%d", i, len(srcs)))
 		mark := fmt.Sprintf("〔图%d〕", i)
-		el, err := findR(page, `.public-DraftEditor-content span[data-text]`, regexp.QuoteMeta(mark), 10*time.Second)
-		if err != nil {
-			return fmt.Errorf("正文里找不到%s", mark)
-		}
-		browser.Show(page)
-		if err := el.Click(proto.InputMouseButtonLeft, 1); err != nil {
-			return err
-		}
-		if err := page.Keyboard.Type(input.End); err != nil {
-			return err
-		}
-		if err := page.KeyActions().Press(input.ShiftLeft).Type(input.Home).Release(input.ShiftLeft).Do(); err != nil {
-			return err
-		}
-		if err := page.Keyboard.Type(input.Backspace); err != nil {
+		if err := clearMarker(ctx, page, `.public-DraftEditor-content`, mark); err != nil {
 			return err
 		}
 		res, err := page.Timeout(evalTimeout).Eval(`(src) => {

@@ -32,6 +32,9 @@ type Job struct {
 	// Original declares the material original (原创声明) where the
 	// platform has that.
 	Original bool
+	// Quote is the title of the account's note to quote (引用笔记) where
+	// the platform has that.
+	Quote string
 	// Report shows the current step to the user.
 	Report func(step string)
 }

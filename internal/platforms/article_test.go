@@ -43,6 +43,17 @@ func TestParagraphs(t *testing.T) {
 	}
 }
 
+// TestLineBreaks keeps a paragraph's lines apart, as escaped list items.
+func TestLineBreaks(t *testing.T) {
+	src := "开头：\n\\- **融资**：813亿\n\\- 估值：1.5万亿"
+	if got := markdownHTML(src); strings.Count(got, "<br") != 2 {
+		t.Errorf("markdownHTML = %q, want 2 line breaks", got)
+	}
+	if got, want := paragraphs(src), "开头：\n- 融资：813亿\n- 估值：1.5万亿"; got != want {
+		t.Errorf("paragraphs = %q, want %q", got, want)
+	}
+}
+
 func TestNoteImages(t *testing.T) {
 	m := store.Material{CoverPath: "c.jpg", Images: []string{"1.jpg", "c.jpg", "2.jpg"}}
 	if got := noteImages(m); !slices.Equal(got, []string{"c.jpg", "1.jpg", "2.jpg"}) {

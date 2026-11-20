@@ -18,15 +18,14 @@ import (
 
 	"github.com/go-rod/rod"
 	"github.com/go-rod/rod/lib/input"
-	"github.com/go-rod/rod/lib/proto"
 )
 
 // publishNetease publishes on NetEase's creator platform (网易号): a video, or
 // an article. Both forms are React ones of the same parts: fields
 // (.ne-easy-form-field) named by their label, dialogs (.ne-modal). The
-// selectors, as of November 2026, are read from the page's code while the
-// account was under review, which shows the forms but publishes nothing
-// (今日已发布0/0); none has been tried on a real publish yet.
+// selectors, as of November 2026, were read from the page's code while the
+// account was under review (今日已发布0/0) and checked on the filled forms
+// once it passed; a publish itself is yet to be tried.
 func publishNetease(ctx context.Context, b *browser.Browser, j Job) error {
 	if j.Material.Kind == store.KindArticle {
 		return neArticle(ctx, b, j)
@@ -128,7 +127,7 @@ func neVideo(ctx context.Context, b *browser.Browser, j Job) error {
 	if _, err := waitElement(ctx, page, fileSel, neKeep); err != nil {
 		return err
 	}
-	if err := neQuota(ctx, page, ".s-publishNum"); err != nil {
+	if err := neQuota(ctx, page, ".postFooter-publishNum"); err != nil {
 		return err
 	}
 	const titleSel = `.postForm input[placeholder*="个字"]`
@@ -273,8 +272,9 @@ func neVideoCategory(ctx context.Context, page *rod.Page) error {
 
 // neVideoTags adds tags: the 添加标签 box takes one typed, ended with
 // Enter (a typed space or comma would end it too, so it is not typed key
-// by key). Those over 10 characters, which NetEase cuts short, are left
-// out; NetEase's suggestions make up 3. It returns how many there are.
+// by key), and stays open for the next. Those over 10 characters, which
+// NetEase cuts short, are left out; NetEase's suggestions make up 3. It
+// returns how many there are.
 func neVideoTags(ctx context.Context, page *rod.Page, tags []string) (int, error) {
 	count := func() int {
 		res, err := page.Timeout(evalTimeout).Eval(`() => document.querySelectorAll(".customTag .custom-taginput-tag").length`)
@@ -291,7 +291,8 @@ func neVideoTags(ctx context.Context, page *rod.Page, tags []string) (int, error
 		if t == "" || utf8.RuneCountInString(t) > neTagLen {
 			continue
 		}
-		if _, err := page.Timeout(evalTimeout).Eval(`() => document.querySelector(".customTag .custom-taginput-addTag")?.click()`); err != nil {
+		// The box stays open after a tag; a click on it then closes it.
+		if _, err := page.Timeout(evalTimeout).Eval(`() => { document.querySelector(".customTag input") || document.querySelector(".customTag .custom-taginput-addTag")?.click(); }`); err != nil {
 			return 0, err
 		}
 		in, err := find(page, `.customTag input`, 3*time.Second)
@@ -555,21 +556,7 @@ func neBody(ctx context.Context, page *rod.Page, j Job, editor *rod.Element, con
 		i++
 		j.Report(fmt.Sprintf("上传正文图片 %d/%d", i, len(paths)))
 		mark := fmt.Sprintf("〔图%d〕", i)
-		el, err := findR(page, `.public-DraftEditor-content span[data-text]`, regexp.QuoteMeta(mark), 10*time.Second)
-		if err != nil {
-			return 0, fmt.Errorf("正文里找不到%s", mark)
-		}
-		browser.Show(page)
-		if err := el.Click(proto.InputMouseButtonLeft, 1); err != nil {
-			return 0, err
-		}
-		if err := page.Keyboard.Type(input.End); err != nil {
-			return 0, err
-		}
-		if err := page.KeyActions().Press(input.ShiftLeft).Type(input.Home).Release(input.ShiftLeft).Do(); err != nil {
-			return 0, err
-		}
-		if err := page.Keyboard.Type(input.Backspace); err != nil {
+		if err := clearMarker(ctx, page, `.public-DraftEditor-content`, mark); err != nil {
 			return 0, err
 		}
 		if err := neInsertPicture(ctx, page, p); err != nil {

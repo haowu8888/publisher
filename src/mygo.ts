@@ -102,6 +102,7 @@ export interface Settings {
   keepBrowser?: boolean;
   collections?: Record<string, string>;
   original?: boolean;
+  quote?: string;
   autoSync?: boolean;
   noUpdateCheck?: boolean;
   ui: UI;

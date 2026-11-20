@@ -157,6 +157,9 @@ type Settings struct {
 	Collections map[string]string `json:"collections,omitempty"`
 	// Original declares Xiaohongshu notes original (原创声明).
 	Original bool `json:"original,omitempty"`
+	// Quote is the title of the account's note that Xiaohongshu notes
+	// quote (引用笔记), as one selling the author's services; none if empty.
+	Quote string `json:"quote,omitempty"`
 	// AutoSync has the schedule add the new files of the sync folders
 	// before each of its runs.
 	AutoSync bool `json:"autoSync,omitempty"`

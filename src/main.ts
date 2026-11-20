@@ -1068,6 +1068,9 @@ function renderSettings() {
           )
           .join("")}
         ${check("original", !!st.original, "小红书声明原创", "发布笔记时打开「原创声明」并同意须知；视频短于 10 秒等平台不支持的笔记会跳过")}
+        <label class="setting">
+          <span class="label"><strong>小红书引用笔记</strong><small>填自己一篇笔记的标题，每篇笔记发布时都「引用」它；找不到时照常发布，任务步骤里会注明</small></span>
+          <input type="text" class="setting-text" data-setting="quote" value="${esc(st.quote ?? "")}" placeholder="不引用" /></label>
       </div>
       <div class="section">
         <h3>更新</h3>
@@ -1158,6 +1161,7 @@ view.addEventListener("change", (e) => {
     else if (id === "tray") s.settings.quitOnClose = !cb.checked;
     else if (id === "closeBrowser") s.settings.keepBrowser = !cb.checked;
     else if (id === "original") s.settings.original = cb.checked;
+    else if (id === "quote") s.settings.quote = cb.value.trim();
     else if (id === "autoSync") s.settings.autoSync = cb.checked;
     else if (id === "updateCheck") s.settings.noUpdateCheck = !cb.checked;
   });

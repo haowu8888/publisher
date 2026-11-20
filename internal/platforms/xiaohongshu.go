@@ -96,9 +96,16 @@ func publishXiaohongshu(ctx context.Context, b *browser.Browser, j Job) error {
 			return err
 		}
 	}
+	skipped := ""
+	if j.Quote != "" {
+		j.Report("引用笔记")
+		if err := xhsQuote(ctx, page, j.Quote); err != nil {
+			// The note publishes as well without.
+			skipped += "（没引用笔记：" + err.Error() + "）"
+		}
+	}
 	// An image note's cover is its first picture; a video's is set in
 	// the cover editor, which shows the video once it is uploaded.
-	skipped := ""
 	if m.Kind == store.KindVideo {
 		if err := waitUploaded(ctx, page, j); err != nil {
 			return err
@@ -140,6 +147,74 @@ func xhsCollection(ctx context.Context, page *rod.Page, name string) error {
 		return err
 	}
 	return pickByName(ctx, page, ".collection-plugin-popover .item", ".item-label", name, "合集", 10*time.Second)
+}
+
+// xhsQuote quotes (引用笔记) the account's note titled title: the card
+// opens 选择笔记 on the account's notes, newest first, more of which load
+// as the list is scrolled to its end; 确认引用 takes the one clicked.
+func xhsQuote(ctx context.Context, page *rod.Page, title string) error {
+	res, err := page.Timeout(evalTimeout).Eval(`() => {
+		const card = document.querySelector(".quote-note-container .setting-card-content");
+		card?.click();
+		return !!card;
+	}`)
+	if err != nil {
+		return err
+	}
+	if !res.Value.Bool() {
+		return errors.New("发布页没有「引用笔记」")
+	}
+	const modal = `.select-note-modal`
+	found := false
+	for last, still, deadline := -1, 0, time.Now().Add(time.Minute); !found; {
+		res, err := page.Timeout(evalTimeout).Eval(`(modal, title) => {
+			const m = document.querySelector(modal);
+			if (!m?.getClientRects().length) return -1;
+			const card = [...m.querySelectorAll(".note-card")]
+				.find((c) => c.querySelector(".note-card__title")?.textContent.trim() === title);
+			if (card) {
+				if (!card.classList.contains("note-card--selected")) card.click();
+				return -2;
+			}
+			const list = m.querySelector(".select-note-modal__list-wrap");
+			if (list) list.scrollTop = list.scrollHeight;
+			return m.querySelectorAll(".note-card").length;
+		}`, modal, title)
+		if err != nil {
+			return err
+		}
+		switch n := res.Value.Int(); {
+		case n == -2:
+			found = true
+			continue
+		case n == last && n >= 0:
+			still++
+		default:
+			last, still = n, 0
+		}
+		// Nothing more has loaded for a while: the list is all there.
+		if still >= 4 || time.Now().After(deadline) {
+			page.Timeout(evalTimeout).Eval(`(modal) => [...document.querySelectorAll(modal + " button")].find((b) => b.textContent.trim() === "取消")?.click()`, modal)
+			if last < 0 {
+				return errors.New("选择笔记的对话框没出来")
+			}
+			return fmt.Errorf("在自己的 %d 篇笔记里没找到「%s」", last, title)
+		}
+		if err := sleep(ctx, time.Second); err != nil {
+			return err
+		}
+	}
+	if err := clickUntilGone(ctx, page, modal+` button`, `^确认引用$`, time.Second, 10*time.Second); err != nil {
+		return fmt.Errorf("选择笔记的对话框%w", err)
+	}
+	res, err = page.Timeout(evalTimeout).Eval(`() => document.querySelector(".quote-note-container__middle")?.textContent ?? ""`)
+	if err != nil {
+		return err
+	}
+	if !strings.Contains(res.Value.Str(), title) {
+		return errors.New("引用没有生效")
+	}
+	return nil
 }
 
 // xhsOriginal turns on 原创声明, agreeing to its terms when asked. It

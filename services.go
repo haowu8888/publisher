@@ -867,6 +867,7 @@ func (x *Settings) Save(st store.Settings, openAtLogin bool) (SettingsInfo, erro
 		}
 	}
 	st.Collections = cleanCollections(st.Collections)
+	st.Quote = strings.TrimSpace(st.Quote)
 	ui, err := cleanUI(st.UI)
 	if err != nil {
 		return SettingsInfo{}, err
