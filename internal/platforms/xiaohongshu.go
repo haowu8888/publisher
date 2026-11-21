@@ -232,23 +232,42 @@ func xhsOriginal(ctx context.Context, page *rod.Page) (bool, error) {
 	if cls, _ := sw.Attribute("class"); cls != nil && strings.Contains(*cls, "disabled") {
 		return false, nil
 	}
+	// A click on a switch already on would turn it off.
+	if on, _, _ := sw.Has(".d-switch-simulator.checked"); on {
+		return true, nil
+	}
 	if err := jsClick(sw); err != nil {
 		return false, err
 	}
-	for deadline := time.Now().Add(15 * time.Second); ; {
+	// The switch shows on at once, while the terms open over it; it is
+	// on only once they are agreed to and 声明原创 clicked, and goes off
+	// again otherwise. Give the terms time to open.
+	if err := sleep(ctx, 1500*time.Millisecond); err != nil {
+		return false, err
+	}
+	for on, deadline := 0, time.Now().Add(15*time.Second); ; {
 		res, err := page.Timeout(evalTimeout).Eval(`() => {
-			const card = [...document.querySelectorAll(".custom-switch-card")].find((c) => c.textContent.includes("原创声明"));
-			if (card?.querySelector(".d-switch-simulator.checked")) return "on";
 			const box = document.querySelector(".originalContainer");
-			if (!box?.offsetParent) return "";
-			const agree = box.querySelector(".d-checkbox");
-			if (agree?.querySelector(".unchecked")) agree.click();
-			const btn = [...box.querySelectorAll("button")].find((b) => b.textContent.trim() === "声明原创");
-			if (btn && !btn.disabled) btn.click();
-			return "";
+			if (box?.offsetParent) {
+				const agree = box.querySelector(".d-checkbox");
+				if (agree?.querySelector(".unchecked")) agree.click();
+				const btn = [...box.querySelectorAll("button")].find((b) => b.textContent.trim() === "声明原创");
+				if (btn && !btn.disabled) btn.click();
+				return "terms";
+			}
+			const card = [...document.querySelectorAll(".custom-switch-card")].find((c) => c.textContent.includes("原创声明"));
+			return card?.querySelector(".d-switch-simulator.checked") ? "on" : "off";
 		}`)
-		if err == nil && res.Value.Str() == "on" {
-			return true, nil
+		switch {
+		case err == nil && res.Value.Str() == "on":
+			// On twice in a row, the terms closed: it has held.
+			if on++; on == 2 {
+				return true, nil
+			}
+		case err == nil && res.Value.Str() == "off":
+			return false, errors.New("原创声明没有开启：须知框关了，开关又回到了关闭")
+		default:
+			on = 0
 		}
 		if time.Now().After(deadline) {
 			return false, errors.New("没能开启原创声明，请在浏览器中查看页面提示")

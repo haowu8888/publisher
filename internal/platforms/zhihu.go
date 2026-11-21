@@ -2,6 +2,9 @@ package platforms
 
 import (
 	"context"
+	"crypto/md5"
+	"crypto/rand"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"regexp"
@@ -357,6 +360,10 @@ func zhArticle(ctx context.Context, b *browser.Browser, j Job) error {
 	if err != nil {
 		return err
 	}
+	content, coverSrc, err := zhPreload(ctx, page, j, content, m.CoverPath)
+	if err != nil {
+		return err
+	}
 	editor, err := find(page, `.public-DraftEditor-content`, 10*time.Second)
 	if err != nil {
 		return errors.New("未找到正文编辑器")
@@ -375,7 +382,12 @@ func zhArticle(ctx context.Context, b *browser.Browser, j Job) error {
 		}
 	}
 
-	note, err := setCover(ctx, page, j, zhArticleCover)
+	note, err := setCover(ctx, page, j, func(ctx context.Context, page *rod.Page, _ string) error {
+		if coverSrc == "" {
+			return errors.New("封面图片没有上传成功")
+		}
+		return zhArticleCover(ctx, page, coverSrc)
+	})
 	if err != nil {
 		return err
 	}
@@ -467,13 +479,7 @@ func zhBody(ctx context.Context, page *rod.Page, j Job, editor *rod.Element, con
 		res, err := page.Timeout(evalTimeout).Eval(`(src) => {
 			const ed = document.querySelector(".public-DraftEditor-content");
 			const before = ed.querySelectorAll("img").length;
-			// The page's policy turns down fetching a data URL.
-			const [head, data] = src.split(",");
-			const bytes = Uint8Array.from(atob(data), (c) => c.charCodeAt(0));
-			const blob = new Blob([bytes], { type: head.slice(5).split(";")[0] });
-			const dt = new DataTransfer();
-			dt.items.add(new File([blob], "image." + (blob.type.split("/")[1] || "png"), { type: blob.type }));
-			ed.dispatchEvent(new ClipboardEvent("paste", { clipboardData: dt, bubbles: true, cancelable: true }));
+			ed.dispatchEvent(new ClipboardEvent("paste", { clipboardData: (`+zhFiles+`)(src), bubbles: true, cancelable: true }));
 			return before;
 		}`, src)
 		if err != nil {
@@ -486,6 +492,152 @@ func zhBody(ctx context.Context, page *rod.Page, j Job, editor *rod.Element, con
 	return nil
 }
 
+// zhFiles is a script function turning a data URL into a DataTransfer
+// holding it as a file. The page's policy turns down fetching a data URL.
+const zhFiles = `(src) => {
+	const [head, data] = src.split(",");
+	const bytes = Uint8Array.from(atob(data), (c) => c.charCodeAt(0));
+	const blob = new Blob([bytes], { type: head.slice(5).split(";")[0] });
+	const dt = new DataTransfer();
+	dt.items.add(new File([blob], "image." + (blob.type.split("/")[1] || "png"), { type: blob.type }));
+	return dt;
+}`
+
+// zhPreload uploads the article's pictures, the body's and the cover,
+// through the cover's upload box before they go into the form, and gives
+// back the content and the cover (a data URL, or "" when it did not go up)
+// with the bytes Zhihu stored. Now and then Zhihu takes about a minute to
+// process an uploaded picture, or never finishes: its pages give up after
+// some 35 seconds and show 上传失败, with no way to try again, and the same
+// picture given again never finishes either, Zhihu knowing pictures by
+// their MD5. So each goes up here first, where a failure does no harm, and
+// is waited for on Zhihu's side, and one that does not finish goes up
+// again with a few bytes added; the body and the cover then take the
+// stored pictures at once. A body picture that will not go up is left to
+// fail where it is used.
+func zhPreload(ctx context.Context, page *rod.Page, j Job, content, cover string) (string, string, error) {
+	var srcs []string
+	seen := map[string]bool{}
+	for _, m := range imgSrc.FindAllStringSubmatch(content, -1) {
+		if strings.HasPrefix(m[2], "data:") && !seen[m[2]] {
+			seen[m[2]] = true
+			srcs = append(srcs, m[2])
+		}
+	}
+	coverSrc := ""
+	if cover != "" {
+		coverSrc, _ = dataURL(cover)
+	}
+	total := len(srcs)
+	if coverSrc != "" {
+		total++
+	}
+	for i, src := range srcs {
+		j.Report(fmt.Sprintf("上传图片 %d/%d", i+1, total))
+		stored, err := zhStore(ctx, page, src)
+		if err != nil {
+			return "", "", err
+		}
+		if stored != "" {
+			content = strings.ReplaceAll(content, src, stored)
+		}
+	}
+	if coverSrc != "" {
+		// Last, so that it is the one the box is left with.
+		j.Report(fmt.Sprintf("上传图片 %d/%d", total, total))
+		stored, err := zhStore(ctx, page, coverSrc)
+		if err != nil {
+			return "", "", err
+		}
+		coverSrc = stored
+	}
+	if coverSrc == "" && total > 0 {
+		page.Timeout(evalTimeout).Eval(`() => document.querySelector(".WriteCoverV2-buttonGroup button[title=删除]")?.click()`)
+	}
+	return content, coverSrc, nil
+}
+
+// zhStore gives the cover's upload box the picture at the data URL src
+// until Zhihu has it stored, with a few random bytes added on each try
+// after the first, and gives back the data URL it stored, or "".
+func zhStore(ctx context.Context, page *rod.Page, src string) (string, error) {
+	var tries []string
+	for try := 0; try < 3; try++ {
+		if try > 0 {
+			src = zhVary(src)
+		}
+		tries = append(tries, src)
+		if err := zhGive(page, src); err != nil {
+			return "", err
+		}
+		for deadline := time.Now().Add(75 * time.Second); time.Now().Before(deadline); {
+			if err := sleep(ctx, 5*time.Second); err != nil {
+				return "", err
+			}
+			// An earlier try may finish yet.
+			for _, t := range tries {
+				if zhStored(page, zhHash(t)) {
+					return t, nil
+				}
+			}
+		}
+	}
+	return "", nil
+}
+
+// zhGive gives the cover's upload box the picture at the data URL src.
+func zhGive(page *rod.Page, src string) error {
+	res, err := page.Timeout(evalTimeout).Eval(`(src) => {
+		const input = document.querySelector("input.UploadPicture-input");
+		if (!input) return false;
+		input.files = (`+zhFiles+`)(src).files;
+		input.dispatchEvent(new Event("change", { bubbles: true }));
+		return true;
+	}`, src)
+	if err != nil {
+		return err
+	}
+	if !res.Value.Bool() {
+		return errors.New("未找到封面上传框")
+	}
+	return nil
+}
+
+// zhHash is the MD5 Zhihu knows the picture at the data URL src by.
+func zhHash(src string) string {
+	data, _ := base64.StdEncoding.DecodeString(src[strings.IndexByte(src, ',')+1:])
+	return fmt.Sprintf("%x", md5.Sum(data))
+}
+
+// zhVary adds random bytes to the end of the picture at the data URL src,
+// which changes its MD5 but not the picture: readers stop at its end.
+func zhVary(src string) string {
+	i := strings.IndexByte(src, ',') + 1
+	data, _ := base64.StdEncoding.DecodeString(src[i:])
+	extra := make([]byte, 16)
+	rand.Read(extra)
+	return src[:i] + base64.StdEncoding.EncodeToString(append(data, extra...))
+}
+
+// zhStored tells whether Zhihu has the picture with the given MD5 stored
+// and processed, asking as its pages do before uploading one: for a
+// picture it has, it answers with an id of its own, whose status shows
+// once processed. The id is kept, a new one being processed afresh.
+func zhStored(page *rod.Page, hash string) bool {
+	res, err := page.Timeout(evalTimeout).Eval(`async (hash) => {
+		const api = "https://api.zhihu.com/images";
+		const ids = (window.__publisherImages ||= {});
+		if (!ids[hash]) {
+			const r = await fetch(api, { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ image_hash: hash, source: "article" }) });
+			const id = (await r.json()).upload_file?.image_id;
+			if (!id) return false;
+			ids[hash] = id;
+		}
+		return (await (await fetch(api + "/" + ids[hash], { credentials: "include" })).json()).status === "success";
+	}`, hash)
+	return err == nil && res.Value.Bool()
+}
+
 // zhImageStored waits until the body shows n pictures, none still a blob
 // or data URL, as one is while it uploads.
 func zhImageStored(ctx context.Context, page *rod.Page, n int) error {
@@ -493,7 +645,7 @@ func zhImageStored(ctx context.Context, page *rod.Page, n int) error {
 		res, err := page.Timeout(evalTimeout).Eval(`() => {
 			const ed = document.querySelector(".public-DraftEditor-content");
 			const imgs = [...ed.querySelectorAll("img")];
-			return { stored: imgs.filter((i) => i.src.startsWith("https://")).length, failed: /图片导入失败/.test(ed.innerText) };
+			return { stored: imgs.filter((i) => i.src.startsWith("https://")).length, failed: /图片导入失败/.test(ed.innerText) || !!ed.querySelector(".Editable-imageUploader-status.is-error") };
 		}`)
 		if err == nil {
 			if res.Value.Get("failed").Bool() {
@@ -512,17 +664,17 @@ func zhImageStored(ctx context.Context, page *rod.Page, n int) error {
 	}
 }
 
-// zhArticleCover uploads the cover under 发布设置; the form shows it once
-// stored.
-func zhArticleCover(ctx context.Context, page *rod.Page, path string) error {
-	in, err := find(page, `input.UploadPicture-input`, 10*time.Second)
-	if err != nil {
-		return errors.New("未找到封面上传框")
-	}
-	if err := in.SetFiles([]string{path}); err != nil {
+// zhArticleCover gives the cover under 发布设置 the picture at the data
+// URL src, which zhPreload has stored, so that it goes up at once (the box
+// may still show 上传失败 from zhPreload); the form shows it once stored.
+func zhArticleCover(ctx context.Context, page *rod.Page, src string) error {
+	if err := zhGive(page, src); err != nil {
 		return err
 	}
 	if _, err := find(page, `img[alt="封面图"][src^="https://"]`, time.Minute); err != nil {
+		if said := pageNotes(page); said != "" {
+			return fmt.Errorf("封面图片没有上传成功，页面显示：%s", said)
+		}
 		return errors.New("封面图片没有上传成功")
 	}
 	return nil

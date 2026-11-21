@@ -719,18 +719,27 @@ func inlineImages(htmlText string, dirs ...string) (string, error) {
 		if p, e := url.PathUnescape(src); e == nil {
 			src = p
 		}
-		b, e := os.ReadFile(locateImage(src, dirs))
+		data, e := dataURL(locateImage(src, dirs))
 		if e != nil {
 			err = fmt.Errorf("正文图片读不了: %w", e)
 			return tag
 		}
-		typ := mime.TypeByExtension(strings.ToLower(filepath.Ext(src)))
-		if typ == "" {
-			typ = "image/png"
-		}
-		return m[1] + "data:" + typ + ";base64," + base64.StdEncoding.EncodeToString(b) + m[3]
+		return m[1] + data + m[3]
 	})
 	return out, err
+}
+
+// dataURL reads the picture at path into a data URL.
+func dataURL(path string) (string, error) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	typ := mime.TypeByExtension(strings.ToLower(filepath.Ext(path)))
+	if typ == "" {
+		typ = "image/png"
+	}
+	return "data:" + typ + ";base64," + base64.StdEncoding.EncodeToString(b), nil
 }
 
 // locateImage resolves a relative picture path against the first of dirs

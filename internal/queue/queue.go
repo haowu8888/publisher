@@ -152,7 +152,7 @@ func (q *Queue) loop() {
 				break
 			}
 			ran = true
-			if failed := q.run(t); failed || t.Mode == store.ModeReview {
+			if q.run(t) {
 				keep = true
 			}
 			// The task's pages may have renewed the session cookies.
@@ -181,8 +181,9 @@ func (q *Queue) update(id string, fn func(*store.Task)) {
 	}
 }
 
-// run runs t and reports whether it failed.
-func (q *Queue) run(t store.Task) (failed bool) {
+// run runs t and reports whether it left a page for the user: a failed
+// task's, or one to review.
+func (q *Queue) run(t store.Task) (keep bool) {
 	// A page that stops answering must not hold up the tasks behind it.
 	ctx, cancel := context.WithTimeout(context.Background(), taskTimeout)
 	defer cancel()
@@ -201,11 +202,15 @@ func (q *Queue) run(t store.Task) (failed bool) {
 	if errors.Is(err, platforms.ErrNotLoggedIn) {
 		q.onLoggedOut(t.Platform)
 	}
-	shot := err != nil && !errors.Is(err, context.Canceled) && q.screenshot(t.ID)
+	var handOver *platforms.HandOver
+	handed := errors.As(err, &handOver)
+	shot := err != nil && !handed && !errors.Is(err, context.Canceled) && q.screenshot(t.ID)
 	q.update(t.ID, func(t *store.Task) {
 		switch {
 		case errors.Is(err, context.Canceled):
 			t.Status, t.Step = store.StatusCanceled, "已取消"
+		case handed:
+			t.Status, t.Step = store.StatusReview, handOver.Step
 		case errors.Is(err, context.DeadlineExceeded):
 			t.Status, t.Error = store.StatusFailed, "超过一小时未完成，已停止；请在浏览器中查看页面"
 		case err != nil:
@@ -215,10 +220,11 @@ func (q *Queue) run(t store.Task) (failed bool) {
 		default:
 			t.Status = store.StatusSuccess
 		}
-		failed = t.Status == store.StatusFailed
+		failed := t.Status == store.StatusFailed
 		t.Shot = failed && shot
+		keep = failed || t.Status == store.StatusReview
 	})
-	return failed
+	return keep
 }
 
 // ShotPath is where the screenshot of task id's failed page goes.

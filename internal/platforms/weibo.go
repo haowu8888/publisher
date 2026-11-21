@@ -266,9 +266,9 @@ func wbVideoCover(ctx context.Context, page *rod.Page, path string) error {
 	}
 }
 
-// wbPublished is waitPublished, saying so when Weibo asks to verify the
-// user (请先验证身份, a slider puzzle) in another tab: that is for the user
-// to do.
+// wbPublished is waitPublished, handing the task over when Weibo asks to
+// verify the user (请先验证身份, a slider puzzle) in another tab: that is
+// for the user to do.
 func wbPublished(ctx context.Context, page *rod.Page, urlMarks []string, text string) error {
 	err := waitPublished(ctx, page, urlMarks, text)
 	if err != nil && ctx.Err() == nil && wbVerifying(page) {
@@ -277,7 +277,7 @@ func wbPublished(ctx context.Context, page *rod.Page, urlMarks []string, text st
 	return err
 }
 
-var errWbVerify = errors.New("微博要求验证身份（拖动滑块），请在浏览器里完成验证后重试")
+var errWbVerify = &HandOver{"微博要求验证身份：请在浏览器的验证页拖动滑块，再回到微博的发布页点「发布」，发出后点「我已提交」"}
 
 // wbVerifying reports whether a tab asks the user to verify.
 func wbVerifying(page *rod.Page) bool {

@@ -23,6 +23,13 @@ import (
 // ErrNotLoggedIn is returned when a publish finds the login page instead.
 var ErrNotLoggedIn = errors.New("未登录，请先在「账号」页登录该平台")
 
+// HandOver is returned by a publish that leaves the rest to the user, its
+// page open in the browser, as a task to review does: Step says what to
+// do. The queue goes on with the tasks behind it.
+type HandOver struct{ Step string }
+
+func (h *HandOver) Error() string { return h.Step }
+
 // Job is what a publish needs.
 type Job struct {
 	Material store.Material

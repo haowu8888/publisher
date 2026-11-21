@@ -750,7 +750,8 @@ events.taskUpdated.on((t) => {
   const moved = state.tasks[i]?.status !== t.status;
   if (i >= 0) state.tasks[i] = t;
   else state.tasks.unshift(t);
-  if (t.status === "review") toast(`${platformName(t.platform)}：已填好，请到浏览器确认提交`);
+  // An auto task goes to review when the platform needs the user, as Weibo's slider check.
+  if (t.status === "review") toast(`${platformName(t.platform)}：${t.mode === "auto" ? t.step : "已填好，请到浏览器确认提交"}`, t.mode === "auto");
   if (t.status === "failed") toast(`${platformName(t.platform)} 发布失败：${t.error}`, true);
   if (t.status === "success") {
     toast(`${platformName(t.platform)} 发布成功`);

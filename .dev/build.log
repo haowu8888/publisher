@@ -1,4 +1,3 @@
-$ mygo build -platform "windows/amd64"
 
   MyGo!!!!! v0.8.3  build
 
@@ -11,19 +10,19 @@ $ mygo build -platform "windows/amd64"
   web | ✓ 7 modules transformed.
   web | rendering chunks...
   web | computing gzip size...
-  web | dist/index.html                  1.33 kB │ gzip:  0.64 kB
+  web | dist/index.html                  1.33 kB │ gzip:  0.63 kB
   web | dist/assets/index-DjwEAmNZ.css  17.35 kB │ gzip:  4.16 kB
-  web | dist/assets/index-BVLV_2Tj.js   49.53 kB │ gzip: 17.21 kB
+  web | dist/assets/index-De6cwIkH.js   49.57 kB │ gzip: 17.22 kB
   web |
-  web | [32m✓ built in 45ms[39m
-  √ Built the frontend  567ms
+  web | [32m✓ built in 42ms[39m
+  √ Built the frontend  468ms
   o Compiling windows/amd64
   √ Compiled windows/amd64  8.2s
   o Creating publisher-setup-0.1.0-amd64.exe
-  √ Created publisher-setup-0.1.0-amd64.exe  12.2s
+  √ Created publisher-setup-0.1.0-amd64.exe  12.1s
   i Copied 2 resources next to the executable
 
-  √ Built Publisher 0.1.0 in 36.2s
+  √ Built Publisher 0.1.0 in 36.0s
 
     build/windows-amd64/
       Publisher.exe                      18.0 MB
