@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"html"
-	"regexp"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -20,8 +19,8 @@ import (
 // publishYidian publishes on Yidian's creator platform (一点号): a video
 // (发视频, for accounts let to), or an article. The pages are Vue ones whose
 // templates are in the page's code, which the selectors, as of November
-// 2026, are read from while the account was under review: the editors then
-// show but do not work, and none has been tried on a real publish yet.
+// 2026, were read from while the account was under review (the editors
+// then show but do not work); both have since been published with.
 func publishYidian(ctx context.Context, b *browser.Browser, j Job) error {
 	if j.Material.Kind == store.KindArticle {
 		return ydArticle(ctx, b, j)
@@ -44,7 +43,8 @@ var ydStatements = map[string]string{
 }
 
 // ydCategory is the category (分类) videos go in, by its levels, which
-// materials do not have: the user's videos are on AI.
+// materials do not have: the user's videos are on AI. The cascader takes
+// only a last level.
 var ydCategory = []string{"科技", "互联网"}
 
 // ydTagMax is how many tags a video takes, each 8 characters at most.
@@ -186,7 +186,10 @@ func ydVideo(ctx context.Context, b *browser.Browser, j Job) error {
 }
 
 // ydCascade picks a category by its levels in a cascader: its box opens a
-// menu whose items open the next level.
+// menu, whose items are named with their initial first (K - 科技), and
+// pointing at an item opens the next level. A click takes the path pointed
+// at, so each level is pointed at (mouseenter), and the last clicked; an
+// item that has a next level takes no click.
 func ydCascade(ctx context.Context, page *rod.Page, sel string, levels []string) error {
 	box, err := find(page, sel, 10*time.Second)
 	if err != nil {
@@ -195,24 +198,37 @@ func ydCascade(ctx context.Context, page *rod.Page, sel string, levels []string)
 	if err := jsClick(box); err != nil {
 		return err
 	}
-	for i, name := range levels {
-		if err := clickVisible(ctx, page, `.cascader-menu-container .cascader-menu-item`, "^"+regexp.QuoteMeta(name)+"$", 5*time.Second); err != nil {
-			// A first level without the second is a category still.
-			if i > 0 {
-				break
-			}
-			return fmt.Errorf("分类里没有「%s」", name)
+	res, err := page.Timeout(evalTimeout).Eval(`async (levels) => {
+		const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+		const lists = () => [...document.querySelectorAll(".cascader-menu-container ul.cascader-menu-list")].filter((u) => u.getClientRects().length);
+		let item;
+		for (const [i, name] of levels.entries()) {
+			for (let t = 0; t < 10 && !lists()[i]; t++) await wait(300);
+			const next = [...(lists()[i]?.children ?? [])].find((li) => li.textContent.trim().replace(/^[A-Z] - /, "") === name);
+			if (!next) return "分类里没有「" + name + "」";
+			item = next;
+			item.dispatchEvent(new MouseEvent("mouseenter"));
+			await wait(300);
 		}
-		if err := sleep(ctx, 300*time.Millisecond); err != nil {
-			return err
-		}
-	}
-	page.Timeout(evalTimeout).Keyboard.Type(input.Escape)
-	res, err := box.Eval(`() => this.value`)
+		item.click();
+		return "";
+	}`, levels)
 	if err != nil {
 		return err
 	}
-	if !strings.Contains(res.Value.Str(), levels[0]) {
+	if msg := res.Value.Str(); msg != "" {
+		page.Timeout(evalTimeout).Keyboard.Type(input.Escape)
+		return errors.New(msg)
+	}
+	if err := sleep(ctx, 500*time.Millisecond); err != nil {
+		return err
+	}
+	value, err := box.Eval(`() => this.value`)
+	if err != nil {
+		return err
+	}
+	if !strings.Contains(value.Value.Str(), levels[len(levels)-1]) {
+		page.Timeout(evalTimeout).Keyboard.Type(input.Escape)
 		return fmt.Errorf("分类「%s」没选上", strings.Join(levels, "/"))
 	}
 	return nil
@@ -325,13 +341,17 @@ func ydVideoCover(ctx context.Context, page *rod.Page, path string) error {
 	}
 }
 
-// ydSubmit clicks the editor's 发布, enabled once all is uploaded, and
-// waits for the page saying 发布成功.
+// ydSubmit clicks the editor's 发布, enabled once all is uploaded, answers
+// the 你确定要发布吗？ dialog it opens, and waits for the page saying
+// 发布成功.
 func ydSubmit(ctx context.Context, page *rod.Page, j Job, sel, note string) error {
 	j.Report("提交发布")
 	startNotes(page)
 	if err := clickVisible(ctx, page, sel+`:not(.mp-btn-disabled)`, "^发布$", 30*time.Second); err != nil {
 		return err
+	}
+	if err := clickVisible(ctx, page, `.dialog.showDialogBody .btn-container button.mp-btn-primary`, "^确定$", 10*time.Second); err != nil {
+		return errors.New("没有弹出「你确定要发布吗？」，发布页可能已改版")
 	}
 	if err := waitPublished(ctx, page, []string{"successGuide"}, "发布成功"); err != nil {
 		return err
