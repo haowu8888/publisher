@@ -16,6 +16,7 @@ import (
 
 	"github.com/go-rod/rod"
 	"github.com/go-rod/rod/lib/input"
+	"github.com/go-rod/rod/lib/proto"
 )
 
 // publishZhihu publishes on Zhihu (知乎): a video (视频), or an article as a
@@ -639,19 +640,41 @@ func zhStored(page *rod.Page, hash string) bool {
 }
 
 // zhImageStored waits until the body shows n pictures, none still a blob
-// or data URL, as one is while it uploads.
+// or data URL, as one is while it uploads. The editor gives up on a
+// picture Zhihu takes too long to process and shows 上传失败 on it, now
+// and then even on one zhPreload stored, each upload getting an id of its
+// own, processed afresh; a click on it uploads it again.
 func zhImageStored(ctx context.Context, page *rod.Page, n int) error {
+	const failed = `.public-DraftEditor-content .Editable-imageUploader-status.is-error`
+	retries := 0
 	for deadline := time.Now().Add(time.Minute); ; {
-		res, err := page.Timeout(evalTimeout).Eval(`() => {
+		res, err := page.Timeout(evalTimeout).Eval(`(failed) => {
 			const ed = document.querySelector(".public-DraftEditor-content");
 			const imgs = [...ed.querySelectorAll("img")];
-			return { stored: imgs.filter((i) => i.src.startsWith("https://")).length, failed: /图片导入失败/.test(ed.innerText) || !!ed.querySelector(".Editable-imageUploader-status.is-error") };
-		}`)
+			return { stored: imgs.filter((i) => i.src.startsWith("https://")).length, refused: /图片导入失败/.test(ed.innerText), failed: !!document.querySelector(failed) };
+		}`, failed)
 		if err == nil {
-			if res.Value.Get("failed").Bool() {
+			if res.Value.Get("refused").Bool() {
 				return errors.New("导入失败")
 			}
-			if res.Value.Get("stored").Int() >= n {
+			if res.Value.Get("failed").Bool() {
+				if retries == 3 {
+					return fmt.Errorf("上传失败（已重试 %d 次）", retries)
+				}
+				retries++
+				el, err := find(page, failed, evalTimeout)
+				if err == nil {
+					browser.Show(page)
+					el = el.Timeout(evalTimeout)
+					if err = el.ScrollIntoView(); err == nil {
+						err = el.Click(proto.InputMouseButtonLeft, 1)
+					}
+				}
+				if err != nil {
+					return fmt.Errorf("上传失败，点击重试也失败: %w", err)
+				}
+				deadline = time.Now().Add(time.Minute)
+			} else if res.Value.Get("stored").Int() >= n {
 				return nil
 			}
 		}

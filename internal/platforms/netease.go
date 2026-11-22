@@ -446,12 +446,21 @@ func neVideoFrame(ctx context.Context, page *rod.Page) error {
 // neSubmit clicks 发布 and waits for the publish to show.
 func neSubmit(ctx context.Context, page *rod.Page, j Job, note string) error {
 	j.Report("提交发布")
-	startNotes(page)
-	if err := clickVisible(ctx, page, "button.ne-button-color-primary", "^发布$", 10*time.Second); err != nil {
-		return err
-	}
-	if err := waitPublished(ctx, page, []string{"content-manage"}, "发布成功"); err != nil {
-		return err
+	// As on Baijiahao, the form now and then ignores 发布 right after it is
+	// filled, saying nothing (seen with an article, its pictures just
+	// stored); a later click publishes. One that went through leaves the
+	// form, so a click is never repeated after the page has answered.
+	for try := 1; ; try++ {
+		if err := clickVisible(ctx, page, "button.ne-button-color-primary", "^发布$", 10*time.Second); err != nil {
+			return err
+		}
+		err := waitPublishedFor(ctx, page, []string{"content-manage"}, "发布成功", 30*time.Second)
+		if err == nil {
+			break
+		}
+		if try == 3 || ctx.Err() != nil || newNotes(page) != "" {
+			return err
+		}
 	}
 	return finish(page, j, "发布成功"+note)
 }
