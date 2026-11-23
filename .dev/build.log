@@ -1,8 +1,9 @@
+$ mygo build -platform "windows/amd64"
 
   MyGo!!!!! v0.8.3  build
 
   o Generating the TypeScript client
-  √ src/mygo.ts is up to date  7.9s
+  √ src/mygo.ts is up to date  8.2s
   o Building the frontend
   web | $ tsc --noEmit && vite build
   web | [36mvite v8.3.7 [32mbuilding client environment for production...[36m[39m
@@ -14,15 +15,15 @@
   web | dist/assets/index-DjwEAmNZ.css  17.35 kB │ gzip:  4.16 kB
   web | dist/assets/index-De6cwIkH.js   49.57 kB │ gzip: 17.22 kB
   web |
-  web | [32m✓ built in 42ms[39m
-  √ Built the frontend  468ms
+  web | [32m✓ built in 44ms[39m
+  √ Built the frontend  464ms
   o Compiling windows/amd64
-  √ Compiled windows/amd64  8.2s
+  √ Compiled windows/amd64  8.3s
   o Creating publisher-setup-0.1.0-amd64.exe
-  √ Created publisher-setup-0.1.0-amd64.exe  12.1s
+  √ Created publisher-setup-0.1.0-amd64.exe  14.4s
   i Copied 2 resources next to the executable
 
-  √ Built Publisher 0.1.0 in 36.0s
+  √ Built Publisher 0.1.0 in 38.8s
 
     build/windows-amd64/
       Publisher.exe                      18.0 MB

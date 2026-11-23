@@ -7,10 +7,12 @@
 // A script "upload:<selector>|<file>" instead sets a file input's files
 // ("<host> >>> <selector>" for one in a shadow root),
 // "shadow:<selector>" prints the element's shadow root, closed or not, and
-// "cookies:<name,...>" prints the profile's cookies of those names, and
+// "cookies:<name,...>" prints the profile's cookies of those names,
+// "cookiedomains:<domain,...>" the names of those on the domains, and
 // "close" closes the tab and "shadowclick:<host>|<selector>" clicks an
 // element in a host's shadow root, closed or not. "chooser:<selector>|<text>|<file>"
-// clicks an element and answers the file chooser it opens. "window" prints
+// clicks an element and answers the file chooser it opens, and
+// "jschooser:<selector>|<file>" does so with a script click. "window" prints
 // the state of the tab's window (minimized, maximized...) and whether the
 // page is hidden; "window:<state>" sets the state first.
 //
@@ -54,6 +56,9 @@ func main() {
 		if page == nil {
 			panic("no tab matches " + os.Args[1])
 		}
+		// Chrome freezes a tab left in the background for a while, and a
+		// frozen one runs no script.
+		page.MustActivate()
 	}
 	fmt.Println("url:", page.MustInfo().URL)
 	if len(os.Args) > 2 && os.Args[2] != "" {
@@ -72,6 +77,11 @@ func main() {
 			return
 		}
 		if string(js) == "close" {
+			// Leaving an editor with content asks 离开此网站？, which would
+			// block the browser.
+			go page.EachEvent(func(e *proto.PageJavascriptDialogOpening) {
+				proto.PageHandleJavaScriptDialog{Accept: true}.Call(page)
+			})()
 			page.MustClose()
 			fmt.Println("closed")
 			return
@@ -94,6 +104,16 @@ func main() {
 			fmt.Println("chosen", files)
 			return
 		}
+		if arg, ok := strings.CutPrefix(string(js), "jschooser:"); ok {
+			// "jschooser:<selector>|<files>" clicks the element by script,
+			// which needs no visible tab, and answers its file chooser.
+			sel, files, _ := strings.Cut(arg, "|")
+			set := page.MustHandleFileDialog()
+			page.MustElement(sel).MustEval(`() => this.click()`)
+			set(strings.Split(files, ";")...)
+			fmt.Println("chosen", files)
+			return
+		}
 		if arg, ok := strings.CutPrefix(string(js), "frame:"); ok {
 			// "frame:<iframe selector>|<js>" runs <js> in the iframe, which
 			// may be on another site, as NetEase's login box.
@@ -105,6 +125,17 @@ func main() {
 				if strings.Contains(","+names+",", ","+c.Name+",") {
 					fmt.Printf("%s domain=%s path=%s expires=%s len=%d httpOnly=%v\n", c.Name, c.Domain, c.Path,
 						time.Unix(int64(c.Expires), 0).Format(time.DateTime), len(c.Value), c.HTTPOnly)
+				}
+			}
+		} else if domains, ok := strings.CutPrefix(string(js), "cookiedomains:"); ok {
+			// The names of the cookies on each of those domains or their
+			// subdomains, to find a new platform's login cookie.
+			for _, c := range b.MustGetCookies() {
+				for _, d := range strings.Split(domains, ",") {
+					if h := strings.TrimPrefix(c.Domain, "."); h == d || strings.HasSuffix(h, "."+d) {
+						fmt.Printf("%s %s expires=%s session=%v len=%d\n", c.Domain, c.Name,
+							time.Unix(int64(c.Expires), 0).Format(time.DateOnly), c.Session, len(c.Value))
+					}
 				}
 			}
 		} else if sel, ok := strings.CutPrefix(string(js), "shadow:"); ok {

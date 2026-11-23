@@ -30,19 +30,29 @@ func main() {
 	}
 	var tabs []struct{ Type, URL, WebSocketDebuggerURL string }
 	json.NewDecoder(res.Body).Decode(&tabs)
-	ws := ""
+	found := false
+	// Every matching tab: the one with the dialog may be a tab being
+	// closed beside a newer one at the same URL.
 	for _, t := range tabs {
-		if t.Type == "page" && strings.Contains(t.URL, os.Args[1]) {
-			ws = t.WebSocketDebuggerURL
+		if t.Type != "page" || !strings.Contains(t.URL, os.Args[1]) {
+			continue
 		}
+		found = true
+		answer(t.WebSocketDebuggerURL)
 	}
-	if ws == "" {
+	if !found {
 		panic("no tab matches " + os.Args[1])
 	}
+}
+
+func answer(ws string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	c := cdp.New().Start(cdp.MustConnectWS(ws))
 	if len(os.Args) > 2 {
+		// A dialog opened before the Page domain was on is not seen
+		// without enabling it.
+		c.Call(ctx, "", "Page.enable", nil)
 		_, err := c.Call(ctx, "", "Page.handleJavaScriptDialog", map[string]any{"accept": os.Args[2] == "accept"})
 		fmt.Println("handled:", err)
 		time.Sleep(3 * time.Second)

@@ -125,8 +125,10 @@ func (l Limits) fitText(text string, tags []string) string {
 }
 
 var (
-	biliLimits   = Limits{Title: 80, Text: 2000}
-	douyinLimits = Limits{Title: 30, Text: 1000, Tags: 5}
+	biliLimits = Limits{Title: 80, Text: 2000}
+	// Bilibili's articles (专栏) have no tags.
+	biliArticleLimits = Limits{Title: 50}
+	douyinLimits      = Limits{Title: 30, Text: 1000, Tags: 5}
 	// Douyin's image posts (图文), which articles go out as.
 	douyinImageLimits = Limits{Title: 20, Text: 1000, Tags: 5}
 	kuaishouLimits    = Limits{Text: 500, Tags: 4}
@@ -159,6 +161,10 @@ var (
 	// posts (图文), which articles go out as, have no title.
 	sohuVideoLimits = Limits{Title: 500, Text: 300}
 	sohuPostLimits  = Limits{Text: 2000, Tags: 5}
+	// Sohu's articles (搜狐号) take topics, its campaigns, apart from the
+	// text.
+	sohuhaoArticleLimits = Limits{Title: 72}
+	sohuhaoVideoLimits   = Limits{Title: 72, Text: 200}
 	// Mango TV takes its tags apart from its description.
 	mgtvLimits = Limits{Title: 30, Text: 250}
 	// iQiyi's video takes no tags.
@@ -184,12 +190,12 @@ var (
 // All lists the platforms in display order.
 var All = []*Platform{
 	{
-		ID: "bilibili", Name: "哔哩哔哩", Kinds: video,
+		ID: "bilibili", Name: "哔哩哔哩", Kinds: videoText,
 		HomeURL: "https://member.bilibili.com/platform/home",
 		Cookie:  "SESSDATA", CookieDomain: "bilibili.com",
 		CookieDomains: []string{"bilibili.com"},
 		Publish:       publishBilibili,
-		Limits:        map[string]Limits{"video": biliLimits},
+		Limits:        map[string]Limits{"video": biliLimits, "article": biliArticleLimits},
 		Check:         checkBilibili,
 	},
 	{
@@ -303,6 +309,17 @@ var All = []*Platform{
 		Limits:        map[string]Limits{"video": sohuVideoLimits, "article": sohuPostLimits},
 	},
 	{
+		// Sohu's creator platform shares Sohu Video's passport sign-on, so
+		// a login to either logs in, or out, both.
+		ID: "sohuhao", Name: "搜狐号", Kinds: videoText,
+		HomeURL: "https://mp.sohu.com/mpfe/v4/contentManagement/first/page",
+		Cookie:  "ppinf", CookieDomain: "sohu.com",
+		CookieDomains: []string{"sohu.com"},
+		Publish:       publishSohuhao,
+		Check:         checkSohuhao,
+		Limits:        map[string]Limits{"video": sohuhaoVideoLimits, "article": sohuhaoArticleLimits},
+	},
+	{
 		// HDCN is Mango TV's sign-on, on mgtv.com for all its sites.
 		ID: "mgtv", Name: "芒果TV", Kinds: video,
 		HomeURL: "https://7.mgtv.com/dashboard",
@@ -353,6 +370,68 @@ var All = []*Platform{
 		Publish:       publishYidian,
 		Check:         checkYidian,
 		Limits:        map[string]Limits{"video": yidianVideoLimits, "article": yidianArticleLimits},
+	},
+	// The platforms below are waiting for their publishing to be written;
+	// their logins can already be checked and copied from Chrome. Their
+	// login cookies are to be confirmed once logged in.
+	{
+		ID: "csdn", Name: "CSDN", Kinds: article,
+		HomeURL: "https://mp.csdn.net/",
+		Cookie:  "UserName", CookieDomain: "csdn.net",
+		CookieDomains: []string{"csdn.net"},
+	},
+	{
+		ID: "juejin", Name: "掘金", Kinds: article,
+		HomeURL: "https://juejin.cn/creator/home",
+		Cookie:  "sessionid", CookieDomain: "juejin.cn",
+		CookieDomains: []string{"juejin.cn"},
+	},
+	{
+		// Its cookies are on cloud.tencent.com; tencent.com holds only
+		// visitor statistics.
+		ID: "tencent-cloud", Name: "腾讯云社区", Kinds: article,
+		HomeURL: "https://cloud.tencent.com/developer/creator/article",
+		Cookie:  "skey", CookieDomain: "cloud.tencent.com",
+		CookieDomains: []string{"cloud.tencent.com"},
+	},
+	{
+		ID: "aliyun", Name: "阿里云社区", Kinds: article,
+		HomeURL: "https://developer.aliyun.com/my",
+		Cookie:  "login_aliyunid_ticket", CookieDomain: "aliyun.com",
+		CookieDomains: []string{"aliyun.com"},
+	},
+	{
+		ID: "cnblogs", Name: "博客园", Kinds: article,
+		HomeURL: "https://i.cnblogs.com/",
+		Cookie:  ".Cnblogs.AspNetCore.Cookies", CookieDomain: "cnblogs.com",
+		CookieDomains: []string{"cnblogs.com"},
+	},
+	{
+		// Visitors get session cookies too, so the login is told from the
+		// settings page, which sends them to /user/login.
+		ID: "segmentfault", Name: "思否", Kinds: article,
+		HomeURL:       "https://segmentfault.com/user/settings",
+		LoginMark:     "login",
+		CookieDomains: []string{"segmentfault.com"},
+	},
+	{
+		// The blog's editor sends a visitor to home.51cto.com to log in.
+		ID: "51cto", Name: "51CTO", Kinds: article,
+		HomeURL:       "https://blog.51cto.com/blogger/publish",
+		LoginMark:     "login",
+		CookieDomains: []string{"51cto.com"},
+	},
+	{
+		ID: "oschina", Name: "开源中国", Kinds: article,
+		HomeURL: "https://my.oschina.net/",
+		Cookie:  "oscid", CookieDomain: "oschina.net",
+		CookieDomains: []string{"oschina.net"},
+	},
+	{
+		ID: "acfun", Name: "AcFun", Kinds: video,
+		HomeURL: "https://member.acfun.cn/",
+		Cookie:  "acPasssToken", CookieDomain: "acfun.cn",
+		CookieDomains: []string{"acfun.cn"},
 	},
 }
 

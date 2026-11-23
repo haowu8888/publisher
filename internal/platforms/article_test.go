@@ -109,3 +109,30 @@ func TestArticleBody(t *testing.T) {
 		t.Errorf("paragraphs: %q", got)
 	}
 }
+
+// TestArticleMarkdown puts the local pictures of the Markdown into it as
+// data URLs, leaving one on the web as it is, and spreads the folder's
+// pictures through a body that shows none.
+func TestArticleMarkdown(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "a.md")
+	if err := os.WriteFile(filepath.Join(dir, "1.png"), []byte("png"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	m := store.Material{ArticlePath: path, Body: "开头\n\n![一](<1.png> \"标题\")\n\n![二](https://x.test/b.jpg)"}
+	got, err := articleMarkdown(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "开头\n\n![一](data:image/png;base64,cG5n \"标题\")\n\n![二](https://x.test/b.jpg)"; got != want {
+		t.Errorf("articleMarkdown = %q, want %q", got, want)
+	}
+
+	m = store.Material{ArticlePath: path, Body: "一\n\n```\n代码\n\n块\n```\n\n二", Images: []string{filepath.Join(dir, "1.png")}}
+	if got, err = articleMarkdown(m); err != nil {
+		t.Fatal(err)
+	}
+	if want := "一\n\n```\n代码\n\n块\n```\n\n![](data:image/png;base64,cG5n)\n\n二"; got != want {
+		t.Errorf("articleMarkdown = %q, want %q", got, want)
+	}
+}

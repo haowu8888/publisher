@@ -116,10 +116,10 @@ func TestNeHeading(t *testing.T) {
 	}
 }
 
-// TestCheckTitleMin refuses, ahead of the form, titles NetEase and Yidian
+// TestCheckTitleMin refuses, ahead of the form, titles NetEase, Yidian and Sohu
 // turn down as too short when submitted by themselves.
 func TestCheckTitleMin(t *testing.T) {
-	for name, check := range map[string]func(store.Material, store.Mode) error{"netease": checkNetease, "yidian": checkYidian} {
+	for name, check := range map[string]func(store.Material, store.Mode) error{"netease": checkNetease, "yidian": checkYidian, "sohuhao": checkSohuhao} {
 		short := store.Material{Kind: store.KindArticle, Title: "四个字的"}
 		if check(short, store.ModeAuto) == nil {
 			t.Errorf("%s: a 4-character title passed", name)

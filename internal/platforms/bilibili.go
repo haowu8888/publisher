@@ -16,10 +16,13 @@ import (
 
 const bilibiliUploadURL = "https://member.bilibili.com/platform/upload/video/frame"
 
-// publishBilibili uploads a video through the member center's upload page.
-// The selectors follow the page as of 2026; when Bilibili changes it, this
-// is the function to update.
+// publishBilibili uploads a video through the member center's upload page,
+// or writes an article (专栏). The selectors follow the pages as of 2026;
+// when Bilibili changes them, these are the functions to update.
 func publishBilibili(ctx context.Context, b *browser.Browser, j Job) error {
+	if j.Material.Kind == store.KindArticle {
+		return biliArticle(ctx, b, j)
+	}
 	m := j.Material
 	page, err := openForm(ctx, b, bilibiliUploadURL, j)
 	if err != nil {
@@ -207,10 +210,10 @@ func bilibiliCover(ctx context.Context, page *rod.Page, path string) error {
 	return errors.New("封面编辑框未关闭")
 }
 
-// checkBilibili refuses a ModeAuto publish without a creation statement,
-// which Bilibili requires and only the user can choose.
+// checkBilibili refuses a ModeAuto publish of a video without a creation
+// statement, which Bilibili requires and only the user can choose.
 func checkBilibili(m store.Material, mode store.Mode) error {
-	if mode == store.ModeAuto && m.Statement == "" {
+	if mode == store.ModeAuto && m.Kind == store.KindVideo && m.Statement == "" {
 		return errors.New("B站全自动发布需要先在素材里选择「创作声明」，或改用确认模式在页面上选")
 	}
 	return nil
