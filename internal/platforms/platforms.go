@@ -170,6 +170,8 @@ var (
 	csdnVideoLimits = Limits{Title: 30, Text: 150}
 	// AcFun takes its tags apart from its description.
 	acfunLimits = Limits{Title: 50, Text: 1000}
+	// AcFun's articles take a description of 50 characters.
+	acfunArticleLimits = Limits{Title: 50, Text: 50}
 	// Juejin takes its tags apart from the text.
 	juejinLimits = Limits{Title: 80}
 	// Mango TV takes its tags apart from its description.
@@ -397,12 +399,12 @@ var All = []*Platform{
 		Limits:        map[string]Limits{"article": juejinLimits},
 	},
 	{
-		ID: "acfun", Name: "AcFun", Kinds: video,
+		ID: "acfun", Name: "AcFun", Kinds: videoText,
 		HomeURL: "https://member.acfun.cn/",
 		Cookie:  "acPasstoken", CookieDomain: "acfun.cn",
 		CookieDomains: []string{"acfun.cn"},
 		Publish:       publishAcfun,
-		Limits:        map[string]Limits{"video": acfunLimits},
+		Limits:        map[string]Limits{"video": acfunLimits, "article": acfunArticleLimits},
 	},
 }
 

@@ -818,6 +818,32 @@ func spreadImages(htmlText string, images []string) string {
 	return b.String()
 }
 
+// markImages replaces each paragraph of an article's HTML holding a local
+// picture with a marker paragraph, 〔图N〕, for an editor that takes
+// pictures only through its own upload, and returns the pictures' files,
+// resolved against dirs, in order. Pictures on the web stay.
+func markImages(content string, dirs []string) (string, []string, error) {
+	var paths []string
+	marked := imgPara.ReplaceAllStringFunc(content, func(p string) string {
+		src := imgSrc.FindStringSubmatch(p)
+		if src == nil || strings.Contains(src[2], "://") || strings.HasPrefix(src[2], "data:") {
+			return p
+		}
+		s := html.UnescapeString(src[2])
+		if u, err := url.PathUnescape(s); err == nil {
+			s = u
+		}
+		paths = append(paths, locateImage(filepath.FromSlash(s), dirs))
+		return fmt.Sprintf("<p>〔图%d〕</p>", len(paths))
+	})
+	for _, p := range paths {
+		if !fileExists(p) {
+			return "", nil, fmt.Errorf("正文图片读不了: %s", p)
+		}
+	}
+	return marked, paths, nil
+}
+
 // bodyImages are the pictures an article's body shows when its Markdown
 // places none: those of its folder but the cover.
 func bodyImages(m store.Material) []string {

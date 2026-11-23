@@ -298,7 +298,7 @@ func csdnVideo(ctx context.Context, b *browser.Browser, j Job) error {
 		return err
 	}
 	const titleSel = `.Management input.el-input__inner[maxlength="30"]`
-	if err := startUpload(ctx, page, fileSel, "mp.csdn.net/mp_others", m.VideoPath, titleSel); err != nil {
+	if err := csdnStartUpload(ctx, page, fileSel, m.VideoPath, titleSel); err != nil {
 		return err
 	}
 
@@ -346,6 +346,34 @@ func csdnVideo(ctx context.Context, b *browser.Browser, j Job) error {
 		return err
 	}
 	return finish(page, j, "发布成功"+note)
+}
+
+// csdnStartUpload gives the upload page the video, and waits for the
+// form it then goes to, which can take a while to load. It gives the file
+// once only, unlike startUpload: the form has a file input matching sel
+// too, and a second file would start the upload over.
+func csdnStartUpload(ctx context.Context, page *rod.Page, sel, path, formSel string) error {
+	if err := sleep(ctx, 2*time.Second); err != nil {
+		return err
+	}
+	in, err := page.Element(sel)
+	if err != nil {
+		return err
+	}
+	if err := in.SetFiles([]string{path}); err != nil {
+		return err
+	}
+	for deadline := time.Now().Add(time.Minute); ; {
+		if ok, _, _ := page.Timeout(evalTimeout).Has(formSel); ok {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return errors.New("选了视频 1 分钟还没出现填写表单，发布页可能已改版")
+		}
+		if err := sleep(ctx, time.Second); err != nil {
+			return err
+		}
+	}
 }
 
 // csdnVideoTags types the tags into the tag box, each ended with Enter;

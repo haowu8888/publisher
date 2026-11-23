@@ -5,8 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"html"
-	"net/url"
-	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -537,23 +535,9 @@ func neArticle(ctx context.Context, b *browser.Browser, j Job) error {
 // deleted; the picture dialog then puts the picture where it was. It
 // returns how many pictures the body has.
 func neBody(ctx context.Context, page *rod.Page, j Job, editor *rod.Element, content, plain string, dirs []string) (int, error) {
-	var paths []string
-	marked := imgPara.ReplaceAllStringFunc(content, func(p string) string {
-		src := imgSrc.FindStringSubmatch(p)
-		if src == nil || strings.Contains(src[2], "://") || strings.HasPrefix(src[2], "data:") {
-			return p
-		}
-		s := html.UnescapeString(src[2])
-		if u, err := url.PathUnescape(s); err == nil {
-			s = u
-		}
-		paths = append(paths, locateImage(filepath.FromSlash(s), dirs))
-		return fmt.Sprintf("<p>〔图%d〕</p>", len(paths))
-	})
-	for _, p := range paths {
-		if !fileExists(p) {
-			return 0, fmt.Errorf("正文图片读不了: %s", p)
-		}
+	marked, paths, err := markImages(content, dirs)
+	if err != nil {
+		return 0, err
 	}
 	if err := pasteHTML(editor, marked, plain); err != nil {
 		return 0, err
