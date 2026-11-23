@@ -107,15 +107,30 @@ func publishAcfun(ctx context.Context, b *browser.Browser, j Job) error {
 	if err := clickVisible(ctx, page, `.video-submit-container button`, "^发布内容$", 10*time.Second); err != nil {
 		return err
 	}
-	if err := waitPublished(ctx, page, []string{"success", "/manage"}, "投稿成功"); err != nil {
+	// AcFun may ask for a code texted to the account's phone first.
+	for deadline := time.Now().Add(15 * time.Second); time.Now().Before(deadline); {
+		res, err := page.Timeout(evalTimeout).Eval(`() => [...document.querySelectorAll("iframe[src*='verify-sms']")].some((f) => f.getClientRects().length)`)
+		if err == nil && res.Value.Bool() {
+			return errAcfunVerify
+		}
+		if info, err := page.Timeout(evalTimeout).Info(); err == nil && !strings.Contains(info.URL, "upload-video") {
+			break
+		}
+		if err := sleep(ctx, time.Second); err != nil {
+			return err
+		}
+	}
+	if err := waitPublished(ctx, page, []string{"acid="}, "提交成功"); err != nil {
 		return err
 	}
 	return finish(page, j, "发布成功"+note)
 }
 
-// acfunPickChannel picks the channel in its cascader: clicking a level's
-// item opens the next, whose items are named with a description after the
-// name.
+var errAcfunVerify = &HandOver{"AcFun 要求手机验证码：请在浏览器里点「获取验证码」，填好后点「确定」，发出后点「我已提交」"}
+
+// acfunPickChannel picks the channel in its cascader: pointing at a
+// level's item opens the next, whose items are named with a description
+// after the name, and clicking the last picks it.
 func acfunPickChannel(ctx context.Context, page *rod.Page, levels []string) error {
 	res, err := page.Timeout(evalTimeout).Eval(`async (levels) => {
 		const wait = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -130,6 +145,7 @@ func acfunPickChannel(ctx context.Context, page *rod.Page, levels []string) erro
 					.find((li) => li.textContent.trim().split(/\s/)[0] === name);
 			}
 			if (!item) return "分区里没有「" + name + "」";
+			item.dispatchEvent(new MouseEvent("mouseenter", { bubbles: true }));
 			item.querySelector(".el-cascader-node__label").click();
 		}
 		await wait(500);

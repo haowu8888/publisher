@@ -168,6 +168,8 @@ var (
 	// CSDN takes its tags apart from the text.
 	csdnLimits      = Limits{Title: 100}
 	csdnVideoLimits = Limits{Title: 30, Text: 150}
+	// AcFun takes its tags apart from its description.
+	acfunLimits = Limits{Title: 50, Text: 1000}
 	// Juejin takes its tags apart from the text.
 	juejinLimits = Limits{Title: 80}
 	// Mango TV takes its tags apart from its description.
@@ -395,12 +397,12 @@ var All = []*Platform{
 		Limits:        map[string]Limits{"article": juejinLimits},
 	},
 	{
-		// Its publishing is not written yet; its login can already be
-		// checked and copied from Chrome.
 		ID: "acfun", Name: "AcFun", Kinds: video,
 		HomeURL: "https://member.acfun.cn/",
 		Cookie:  "acPasstoken", CookieDomain: "acfun.cn",
 		CookieDomains: []string{"acfun.cn"},
+		Publish:       publishAcfun,
+		Limits:        map[string]Limits{"video": acfunLimits},
 	},
 }
 
