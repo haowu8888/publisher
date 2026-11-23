@@ -177,13 +177,16 @@ button.ghost.on { color: var(--accent); }
 .sched-kind { display: flex; flex-direction: column; gap: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
 
 .platforms { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 8px; }
+/* A name stays on one line; the status pills go below it when the tile is
+   too narrow for them, rather than squeezing a Chinese name into a column
+   or pushing a Latin one (CSDN, AcFun) past the border. */
 .plat {
-  display: flex; align-items: center; gap: 8px; padding: 10px; border-radius: var(--radius-sm);
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; padding: 10px; border-radius: var(--radius-sm);
   border: 1px solid var(--line); cursor: pointer; user-select: none;
 }
 .plat:has(input:checked) { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, transparent); }
 .plat.disabled { opacity: 0.55; cursor: default; }
-.plat .name { font-weight: 600; flex: 1; }
+.plat .name { font-weight: 600; flex: 1 0 auto; white-space: nowrap; }
 .plat input { accent-color: var(--accent); }
 
 .modes { display: flex; gap: 16px; flex-wrap: wrap; }
