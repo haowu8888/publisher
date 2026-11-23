@@ -81,8 +81,10 @@ async function render() {
       continue;
     }
     const n = (await cookiesOf(p.domains)).length;
+    // Apps before 0.3.12 give no URL.
+    const open = p.url ? `<a class="open" href="${esc(p.url)}" title="打开${esc(p.name)}，没登录的话在那里登录">打开</a>` : "";
     rows.push(
-      `<li><label><input type="checkbox" value="${esc(p.id)}" ${unpicked.has(p.id) ? "" : "checked"}><span class="name">${esc(p.name)}</span><small>${n ? `${n} 条 Cookie` : "本浏览器未登录"}</small></label></li>`,
+      `<li><label><input type="checkbox" value="${esc(p.id)}" ${unpicked.has(p.id) ? "" : "checked"}><span class="name">${esc(p.name)}</span><small>${n ? `${n} 条 Cookie` : "本浏览器未登录"}</small>${open}</label></li>`,
     );
   }
   list.innerHTML = rows.join("");
@@ -144,6 +146,13 @@ async function sync(ids) {
 
 allButton.addEventListener("click", () => sync(null));
 pickedButton.addEventListener("click", () => sync(picked()));
+// A link opens the platform in a new tab, leaving its row's tick as it was.
+list.addEventListener("click", (e) => {
+  const a = e.target.closest("a.open");
+  if (!a) return;
+  e.preventDefault();
+  chrome.tabs.create({ url: a.href });
+});
 list.addEventListener("change", () => {
   saveUnpicked();
   updatePicked();

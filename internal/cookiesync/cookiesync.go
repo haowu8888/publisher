@@ -87,6 +87,9 @@ type Platform struct {
 	// cannot be copied.
 	Domains []string `json:"domains"`
 	Note    string   `json:"note,omitempty"`
+	// URL is its creator center, which shows a visitor its login page;
+	// the extension opens it for the user to log in.
+	URL string `json:"url,omitempty"`
 }
 
 // Handler serves the extension.
