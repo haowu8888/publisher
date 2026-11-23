@@ -109,7 +109,9 @@ small { font-size: 12px; }
 .nav-item.active::before {
   content: ""; position: absolute; left: 0; top: 9px; bottom: 9px; width: 3px; border-radius: 2px; background: var(--accent);
 }
-.nav-foot { margin-top: auto; padding: 8px; font-size: 12px; }
+/* One line at the usual width; when it must wrap, two even lines rather
+   than a last character alone. */
+.nav-foot { margin-top: auto; padding: 8px 2px; font-size: 12px; text-wrap: balance; }
 .badge {
   min-width: 18px; padding: 0 6px; border-radius: 9px; font-size: 12px; line-height: 18px;
   text-align: center; background: var(--accent); color: var(--accent-ink);
