@@ -172,6 +172,8 @@ var (
 	acfunLimits = Limits{Title: 50, Text: 1000}
 	// AcFun's articles take a description of 50 characters.
 	acfunArticleLimits = Limits{Title: 50, Text: 50}
+	// YouTube takes its tags apart from the description.
+	youtubeLimits = Limits{Title: 100, Text: 5000}
 	// Juejin takes its tags apart from the text.
 	juejinLimits = Limits{Title: 80}
 	// Mango TV takes its tags apart from its description.
@@ -405,6 +407,17 @@ var All = []*Platform{
 		CookieDomains: []string{"acfun.cn"},
 		Publish:       publishAcfun,
 		Limits:        map[string]Limits{"video": acfunLimits, "article": acfunArticleLimits},
+	},
+	{
+		// Studio sends a visitor to accounts.google.com. Google ties its
+		// sessions to the browser, so copied cookies show the account as
+		// signed out (LOGIN_INFO stays, so it tells nothing).
+		ID: "youtube", Name: "YouTube", Kinds: video,
+		HomeURL:       "https://studio.youtube.com/",
+		CookieDomains: []string{"youtube.com", "google.com"},
+		LoginNote:     "需在本应用里登录：Google 不认从 Chrome 复制的登录",
+		Publish:       publishYoutube,
+		Limits:        map[string]Limits{"video": youtubeLimits},
 	},
 }
 

@@ -40,7 +40,9 @@ func main() {
 		panic(err)
 	}
 	port, path, _ := strings.Cut(strings.TrimSpace(string(data)), "\n")
-	b := rod.New().ControlURL("ws://127.0.0.1:" + strings.TrimSpace(port) + strings.TrimSpace(path)).MustConnect()
+	// No device emulation: rod's default one would give the tab a Mac
+	// Chrome 114 user agent, which sites such as Google refuse.
+	b := rod.New().ControlURL("ws://127.0.0.1:" + strings.TrimSpace(port) + strings.TrimSpace(path)).NoDefaultDevice().MustConnect()
 
 	var page *rod.Page
 	if strings.HasPrefix(os.Args[1], "http") {
