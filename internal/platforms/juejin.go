@@ -208,18 +208,26 @@ func juejinTags(ctx context.Context, page *rod.Page, tags []string) error {
 	return nil
 }
 
-// juejinCover uploads the cover, which Juejin takes as it is.
+// juejinCover uploads the cover, which Juejin takes as it is. The upload
+// now and then never finishes, so it is tried again, three times at most.
 func juejinCover(ctx context.Context, page *rod.Page, path string) error {
-	page.Timeout(evalTimeout).Eval(`() => document.querySelector(".publish-popup .coverselector_container .delete-btn")?.click()`)
-	in, err := find(page, `.publish-popup .coverselector_container input[type=file]`, 5*time.Second)
-	if err != nil {
-		return errors.New("未找到封面上传框")
+	for try := 1; ; try++ {
+		page.Timeout(evalTimeout).Eval(`() => document.querySelector(".publish-popup .coverselector_container .delete-btn")?.click()`)
+		in, err := find(page, `.publish-popup .coverselector_container input[type=file]`, 5*time.Second)
+		if err != nil {
+			return errors.New("未找到封面上传框")
+		}
+		if err := in.SetFiles([]string{path}); err != nil {
+			return err
+		}
+		if _, err := find(page, `.publish-popup .coverselector_container img.preview-image[src^="http"]`, 30*time.Second); err == nil {
+			return nil
+		}
+		if try == 3 {
+			return errors.New("封面没有上传成功")
+		}
+		if err := sleep(ctx, 2*time.Second); err != nil {
+			return err
+		}
 	}
-	if err := in.SetFiles([]string{path}); err != nil {
-		return err
-	}
-	if _, err := find(page, `.publish-popup .coverselector_container img.preview-image[src^="http"]`, 30*time.Second); err != nil {
-		return errors.New("封面没有上传成功")
-	}
-	return nil
 }

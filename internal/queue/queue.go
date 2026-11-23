@@ -6,9 +6,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -213,6 +215,8 @@ func (q *Queue) run(t store.Task) (keep bool) {
 			t.Status, t.Step = store.StatusReview, handOver.Step
 		case errors.Is(err, context.DeadlineExceeded):
 			t.Status, t.Error = store.StatusFailed, "超过一小时未完成，已停止；请在浏览器中查看页面"
+		case browserGone(err):
+			t.Status, t.Error = store.StatusFailed, fmt.Sprintf("浏览器在「%s」时被关闭或崩溃，任务中断，请重试", t.Step)
 		case err != nil:
 			t.Status, t.Error = store.StatusFailed, err.Error()
 		case t.Mode == store.ModeReview:
@@ -225,6 +229,13 @@ func (q *Queue) run(t store.Task) (keep bool) {
 		keep = failed || t.Status == store.StatusReview
 	})
 	return keep
+}
+
+// browserGone reports whether err is the browser's connection closing
+// mid-task, as when the user closes Chrome or it crashes: the page's own
+// error then only says "use of closed network connection".
+func browserGone(err error) bool {
+	return errors.Is(err, net.ErrClosed) || err != nil && strings.Contains(err.Error(), "use of closed network connection")
 }
 
 // ShotPath is where the screenshot of task id's failed page goes.
