@@ -304,3 +304,43 @@ func TestUnpublish(t *testing.T) {
 		t.Error("douyin is no longer published")
 	}
 }
+
+// TestMoveMaterial checks moving in import order, which the materials keep
+// reversed.
+func TestMoveMaterial(t *testing.T) {
+	s, err := Open(filepath.Join(t.TempDir(), "data.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.AddMaterials(Material{ID: "a"}, Material{ID: "b"}, Material{ID: "c"}, Material{ID: "d"}); err != nil {
+		t.Fatal(err)
+	}
+	order := func() string {
+		var o string
+		ms := s.Materials()
+		for i := len(ms) - 1; i >= 0; i-- {
+			o += ms[i].ID
+		}
+		return o
+	}
+	for _, c := range []struct {
+		id, target string
+		after      bool
+		want       string
+	}{
+		{"d", "a", false, "dabc"},
+		{"d", "b", true, "abdc"},
+		{"a", "c", true, "bdca"},
+		{"c", "d", false, "bcda"},
+	} {
+		if err := s.MoveMaterial(c.id, c.target, c.after); err != nil {
+			t.Fatal(err)
+		}
+		if got := order(); got != c.want {
+			t.Errorf("move %s next to %s (after %v) = %s, want %s", c.id, c.target, c.after, got, c.want)
+		}
+	}
+	if err := s.MoveMaterial("a", "x", false); err != ErrNotFound || order() != "bcda" {
+		t.Errorf("move next to a missing material: %v, order %s", err, order())
+	}
+}

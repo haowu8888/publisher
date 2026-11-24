@@ -159,6 +159,14 @@ button.ghost.on { color: var(--accent); }
 .mat-item .state { font-size: 12px; font-weight: 600; color: var(--muted); margin-right: 4px; }
 .mat-item .state.ok { color: var(--ok); }
 .mat-item .state.info { color: var(--info); }
+/* The order buttons show over the top right of the item pointed at. */
+.mat-row { position: relative; }
+.mat-row .moves {
+  position: absolute; top: 6px; right: 6px; display: none; gap: 2px;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius-sm); box-shadow: 0 2px 8px rgb(0 0 0 / 0.12);
+}
+.mat-row:hover .moves, .mat-row:focus-within .moves { display: flex; }
+.mat-row .moves button { padding: 2px 8px; }
 
 .editor { flex: 1; min-width: 0; overflow: auto; padding: 20px 24px; display: flex; flex-direction: column; gap: 16px; }
 .field { display: flex; flex-direction: column; gap: 6px; }
@@ -282,6 +290,8 @@ input.num { width: 72px; border: 1px solid var(--line); background: var(--panel)
 .pending.scroll { max-height: 440px; overflow-y: auto; padding-right: 6px; margin-right: -6px; }
 .pending .kind { width: 30px; height: 26px; }
 .pending .t { flex: 1; min-width: 0; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pending .moves { display: flex; gap: 2px; flex-shrink: 0; }
+.pending .moves button { padding: 2px 8px; }
 
 /* Settings */
 .setting { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 4px 0; }

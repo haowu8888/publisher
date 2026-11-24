@@ -233,7 +233,7 @@ function renderLibrary() {
               </div>
               <div class="mat-list" data-kind="${state.kind}">${
                 list.length
-                  ? list.map(materialItem).join("")
+                  ? materialItems(list)
                   : `<div class="empty"><span>还没有${isVideo ? "视频" : "文章"}</span>
                      <button data-act="${isVideo ? "import-video" : "import-article"}">导入${isVideo ? "视频" : "文章"}</button></div>`
               }</div>
@@ -260,7 +260,24 @@ const published = (m: Material) => {
   return Object.keys(done).length > 0 && state.tasks.every((t) => t.materialId !== m.id || (t.platform in done && !busy(t)));
 };
 
-function materialItem(m: Material) {
+// materialItems draws the library's list. Only materials not yet published
+// anywhere move, the ones the schedule may still publish, and only among
+// themselves: the published ones have all their order buttons off.
+function materialItems(list: Material[]) {
+  const sent = (m: Material) => Object.keys(m.published ?? {}).length > 0;
+  const movable = list.filter((m) => !sent(m));
+  return list
+    .map((m) => {
+      const i = sent(m) ? -1 : movable.indexOf(m);
+      return i < 0 ? materialItem(m) : materialItem(m, movable[i - 1]?.id, movable[i + 1]?.id, movable[0]?.id);
+    })
+    .join("");
+}
+
+// materialItem draws a material of the library's list, with the movable
+// ones just before and after it and the first of them; without them its
+// order buttons are off.
+function materialItem(m: Material, before?: string, after?: string, first?: string) {
   const done = state.accounts.map((a) => a.id).filter((id) => id in (m.published ?? {}));
   // Platforms it went out to, then the latest try at the others.
   const pills = [
@@ -274,11 +291,19 @@ function materialItem(m: Material) {
     : done.length
       ? `<span class="state ok">已发布</span>`
       : `<span class="state">未发布</span>`;
-  return `<button class="mat-item ${m.id === state.selected ? "active" : ""}" data-select="${m.id}">
+  // The order buttons sit over the item, not in it: buttons can't nest.
+  return `<div class="mat-row"><button class="mat-item ${m.id === state.selected ? "active" : ""}" data-select="${m.id}">
     <span class="kind ${m.kind}">${m.kind === "video" ? "视频" : "文章"}</span>
     <span style="min-width:0"><span class="t">${esc(m.title || "（无标题）")}</span>
     <span class="dots">${tag}${pills}</span></span>
-  </button>`;
+  </button><span class="moves">${moveButton(m.id, first, false, !!before, "置顶", "移到最前，定时发布先发")}${moveButton(
+    m.id,
+    before,
+    false,
+    !!before,
+    "↑",
+    "上移",
+  )}${moveButton(m.id, after, true, !!after, "↓", "下移")}</span></div>`;
 }
 
 function renderEditor(m: Material) {
@@ -782,7 +807,7 @@ events.accountUpdated.on((a) => {
 
 function refreshLibraryTasks() {
   const list = document.querySelector(".mat-list");
-  if (list) list.innerHTML = shownMaterials().map(materialItem).join("");
+  if (list) list.innerHTML = materialItems(shownMaterials());
   const m = state.materials.find((x) => x.id === state.selected);
   const box = document.querySelector("#mat-tasks");
   if (m && box) box.innerHTML = materialTasks(m);
@@ -809,7 +834,7 @@ function renderSchedule() {
   view.innerHTML = `
     <div class="view-head"><h2>定时发布</h2></div>
     <div class="view-body">
-      <div class="notice">到点后，把素材库里<strong>还没发布过</strong>的素材按导入顺序（先导入的先发）<strong>全自动</strong>发布。视频和文章各自按自己的时间发。每个素材只会被定时发一次，失败的请在任务页重试。同步文件夹里的新文件要先同步进素材库，或在设置里打开「定时发布前自动同步文件夹」。需要本应用保持打开（可以最小化）；电脑睡眠错过 10 分钟以上的那次会跳过。</div>
+      <div class="notice">到点后，把素材库里<strong>还没发布过</strong>的素材按导入顺序（先导入的先发，可在下面的列表里调整）<strong>全自动</strong>发布。视频和文章各自按自己的时间发。每个素材只会被定时发一次，失败的请在任务页重试。同步文件夹里的新文件要先同步进素材库，或在设置里打开「定时发布前自动同步文件夹」。需要本应用保持打开（可以最小化）；电脑睡眠错过 10 分钟以上的那次会跳过。</div>
       <div class="section" id="sched-form">
         <label class="switch"><input type="checkbox" id="s-enabled" ${sc.enabled ? "checked" : ""} /> 启用定时发布</label>
         ${kinds
@@ -875,13 +900,27 @@ function pendingSection(info: ScheduleInfo) {
         ? `<div class="muted">没有待发布的${state.kind === "video" ? "视频" : "文章"}。导入新素材，或在上面勾选要发布的平台。</div>`
         : `<ol class="pending scroll" data-kind="${state.kind}">${list
             .map(
-              (p) => `<li><span class="kind ${p.kind}">${p.kind === "video" ? "视频" : "文章"}</span>
+              (p, i) => `<li><span class="kind ${p.kind}">${p.kind === "video" ? "视频" : "文章"}</span>
                 <span class="t">${esc(p.title || "（无标题）")}</span>
                 <span class="muted"><small>${p.platforms.map(platformName).join("、")}</small></span>
-                ${p.next ? `<span class="pill info">下一批</span>` : ""}</li>`,
+                ${p.next ? `<span class="pill info">下一批</span>` : ""}
+                <span class="moves">${moveButton(p.id, list[0]?.id, false, i > 0, "置顶", "移到最前，下一批先发")}${moveButton(
+                  p.id,
+                  list[i - 1]?.id,
+                  false,
+                  i > 0,
+                  "↑",
+                  "上移",
+                )}${moveButton(p.id, list[i + 1]?.id, true, i < list.length - 1, "↓", "下移")}</span></li>`,
             )
             .join("")}</ol>`
     }`;
+}
+
+// moveButton puts the material id just before target in import order,
+// the order the schedule publishes in, or after it.
+function moveButton(id: string, target: string | undefined, after: boolean, on: boolean, label: string, title: string) {
+  return `<button class="ghost" data-act="move" data-id="${id}" data-target="${target ?? ""}" ${after ? `data-after="1"` : ""} title="${title}" ${on ? "" : "disabled"}>${label}</button>`;
 }
 
 function readSchedule() {
@@ -1314,6 +1353,21 @@ view.addEventListener("click", async (e) => {
       state.schedule = info;
       toast(info.schedule.enabled ? "已保存，定时发布已启用" : "已保存，定时发布未启用");
       return render();
+    }
+    case "move": {
+      if (!d.id || !d.target) return;
+      if (!(await attempt(() => Library.move(d.id!, d.target!, !!d.after).then(() => true)))) return;
+      // The library and the schedule show the same order.
+      state.materials = await Library.list();
+      if (state.view === "library") return render();
+      const info = await attempt(() => Scheduler.get());
+      if (!info) return;
+      state.schedule = info;
+      const top = document.querySelector<HTMLElement>("ol.pending")?.scrollTop ?? 0;
+      $("#pending").innerHTML = pendingSection(info);
+      const list = document.querySelector<HTMLElement>("ol.pending");
+      if (list) list.scrollTop = top;
+      return;
     }
     case "run-schedule": {
       if (!(await ask("现在就全自动发布下一批素材？", { title: "立即发布下一批", ok: "发布" }))) return;

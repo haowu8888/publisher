@@ -397,6 +397,31 @@ func (s *Store) AddMaterials(ms ...Material) ([]Material, error) {
 	return added, s.save()
 }
 
+// MoveMaterial moves the material with id next to the one with target, so
+// that in import order (oldest first, the schedule's order) it comes just
+// before target, or just after it if after is set.
+func (s *Store) MoveMaterial(id, target string, after bool) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	i := slices.IndexFunc(s.d.Materials, func(m Material) bool { return m.ID == id })
+	if i < 0 || id == target {
+		return ErrNotFound
+	}
+	m := s.d.Materials[i]
+	s.d.Materials = slices.Delete(s.d.Materials, i, i+1)
+	j := slices.IndexFunc(s.d.Materials, func(m Material) bool { return m.ID == target })
+	if j < 0 {
+		s.d.Materials = slices.Insert(s.d.Materials, i, m)
+		return ErrNotFound
+	}
+	// Materials are kept newest first: earlier in import order is later here.
+	if !after {
+		j++
+	}
+	s.d.Materials = slices.Insert(s.d.Materials, j, m)
+	return s.save()
+}
+
 // UpdateMaterial applies fn to the material with id and returns the
 // result, all under the lock: a material read, changed and put back whole
 // would undo what the schedule or the user changed meanwhile. Published is

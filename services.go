@@ -379,6 +379,12 @@ func (l *Library) Reveal(id string) error {
 // task queued or running stays too.
 func (l *Library) Delete(id string) error { return l.store.DeleteMaterials(id) }
 
+// Move puts the material id just before target in import order, or just
+// after it if after is set. The schedule publishes in this order.
+func (l *Library) Move(id, target string, after bool) error {
+	return l.store.MoveMaterial(id, target, after)
+}
+
 // Unpublish takes back that a material went out to a platform, which a
 // task took for success though nothing was published there; its tasks
 // there turn failed, to retry, and the page reloads them.
@@ -813,6 +819,7 @@ func cleanTimes(in []string) ([]string, error) {
 
 // RunNow publishes the next materials right away.
 func (x *Scheduler) RunNow() ScheduleInfo { return x.info(x.sched.Run()) }
+
 
 // statements are the creation statements Bilibili offers, in its words.
 var statements = []string{"内容无需标注", "含AI生成内容", "含虚构演绎内容"}

@@ -262,6 +262,13 @@ export const Library = {
     return call("Library.List");
   },
   /**
+   * Move puts the material id just before target in import order, or just
+   * after it if after is set. The schedule publishes in this order.
+   */
+  move(id: string, target: string, after: boolean): Promise<void> {
+    return call("Library.Move", id, target, after);
+  },
+  /**
    * PickCover asks for a cover image for a material. An empty result keeps
    * the current cover.
    */
