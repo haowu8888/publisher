@@ -1046,6 +1046,29 @@ function renderSettings() {
   const check = (id: string, on: boolean, title: string, note: string) => `<label class="setting">
       <span class="label"><strong>${title}</strong><small>${note}</small></span>
       <input type="checkbox" data-setting="${id}" ${on ? "checked" : ""} /></label>`;
+  const imp = st.import ?? {};
+  // impCheck, impText, impNum and impChoice are the import rules' controls:
+  // a checkbox that shows the opposite of a no… field (neg), a text box
+  // and a number box whose placeholder is the default, and a segmented
+  // choice whose "" is the default.
+  const impCheck = (field: string, on: boolean, title: string, note: string, neg = false) => `<label class="setting">
+      <span class="label"><strong>${title}</strong><small>${note}</small></span>
+      <input type="checkbox" data-imp="${field}" ${neg ? "data-neg" : ""} ${on ? "checked" : ""} /></label>`;
+  const impText = (field: keyof typeof imp, title: string, note: string, def: string) => `<label class="setting">
+      <span class="label"><strong>${title}</strong><small>${note}</small></span>
+      <input type="text" class="setting-text short" data-imp="${field}" value="${esc(String(imp[field] ?? ""))}" placeholder="${esc(def)}" /></label>`;
+  const impNum = (field: keyof typeof imp, title: string, note: string, def: number, lo: number, hi: number, unit: string) => `<label class="setting">
+      <span class="label"><strong>${title}</strong><small>${note}</small></span>
+      <span class="row"><input type="number" class="num" data-imp="${field}" min="${lo}" max="${hi}" value="${imp[field] || ""}" placeholder="${def}" /> ${unit}</span></label>`;
+  const impChoice = (field: keyof typeof imp, title: string, note: string, options: [string, string][]) => `<div class="setting">
+      <span class="label"><strong>${title}</strong><small>${note}</small></span>
+      <div class="segmented">${options
+        .map(([v, label]) => `<button data-imp="${field}" data-v="${v}" class="${String(imp[field] ?? "") === v ? "active" : ""}">${label}</button>`)
+        .join("")}</div></div>`;
+  const coverSuffix = imp.coverSuffix || "_cover";
+  const captionSuffix = imp.captionSuffix || "_caption";
+  const imageCover = imp.imageCover || "cover";
+  const settle = imp.settle || 5;
   view.innerHTML = `
     <div class="view-head"><h2>设置</h2></div>
     <div class="view-body">
@@ -1097,7 +1120,7 @@ function renderSettings() {
       </div>
       <div class="section">
         <h3>发布</h3>
-        ${check("autoSync", !!st.autoSync, "定时发布前自动同步文件夹", "到点时先导入同步文件夹里新增的视频和文章，再按顺序发布；5 分钟内还在改动的文件留到下一次")}
+        ${check("autoSync", !!st.autoSync, "定时发布前自动同步文件夹", `到点时先导入同步文件夹里新增的视频和文章，再按顺序发布；${settle} 分钟内还在改动的文件留到下一次（在下面「导入规则」里改）`)}
         ${check("closeBrowser", !st.keepBrowser, "全自动任务跑完后关闭浏览器", "仅限本轮任务才打开的浏览器；有确认模式任务、或你原本就开着浏览器时不会关")}
         ${state.accounts
           .filter((a) => a.collections)
@@ -1111,6 +1134,46 @@ function renderSettings() {
         <label class="setting">
           <span class="label"><strong>小红书引用笔记</strong><small>填自己一篇笔记的标题，每篇笔记发布时都「引用」它；找不到时照常发布，任务步骤里会注明</small></span>
           <input type="text" class="setting-text" data-setting="quote" value="${esc(st.quote ?? "")}" placeholder="不引用" /></label>
+      </div>
+      <div class="section">
+        <div class="row"><h3>导入规则</h3><span class="spacer"></span><button class="ghost" data-act="reset-import">恢复默认</button></div>
+        <div class="muted"><small>导入视频、文章和同步文件夹时按这些规则自动填写素材；只影响之后导入的，已导入的素材不会重新解析。留空的框用灰字的默认值。</small></div>
+        <h4>视频</h4>
+        ${impText("coverSuffix", "封面文件名后缀", `ep1.mp4 的封面是 ep1${esc(coverSuffix)}.jpg，没有就用同名的 ep1.jpg（jpg/png/webp 都行）；文章的封面同理，都没有时再用图片文件夹里的`, "_cover")}
+        ${impCheck("noCaption", !imp.noCaption, "读取字幕文件", `读 ep1${esc(captionSuffix)}.txt 或 ep1.txt：正文作简介，只含 #标签 的行作标签；这类 .txt 不会被当成文章导入`, true)}
+        ${
+          imp.noCaption
+            ? ""
+            : `${impText("captionSuffix", "字幕文件名后缀", `ep1.mp4 的字幕是 ep1${esc(captionSuffix)}.txt，没有就用 ep1.txt`, "_caption")}
+        ${impCheck("nameTitle", !imp.nameTitle, "从字幕推导标题", "取第一句，太短接下一句，太长按逗号、分号等分句截短；关掉时用视频文件名作标题", true)}
+        ${imp.nameTitle ? "" : `${impNum("titleMin", "标题最短", "第一句不到这么多字时接上下一句", 10, 2, 30, "字")}
+        ${impNum("titleMax", "标题最长", "超过时截到这个字数以内的完整分句（各平台发布时还会按自己的上限截断）", 30, 10, 100, "字")}`}`
+        }
+        ${impChoice("statement", "默认创作声明", "新导入视频的创作声明，素材里可单独改", [
+          ["", "无需标注"],
+          ["含AI生成内容", "含 AI 生成"],
+          ["含虚构演绎内容", "含虚构演绎"],
+        ])}
+        <h4>文章</h4>
+        ${impCheck("noHeading", !imp.noHeading, "开头的 # 标题作为标题", "Markdown 开头 “# 标题” 这一行作标题并从正文去掉；关掉时用文件名作标题，这一行留在正文", true)}
+        ${impCheck("noImages", !imp.noImages, "读取同名图片文件夹", "文章.md 旁边的「文章」文件夹里的图片按文件名自然排序作为文章图片", true)}
+        ${imp.noImages ? "" : impText("imageCover", "图片文件夹里的封面", `图片文件夹里名为 ${esc(imageCover)}.jpg（或 png/webp）的作封面，没有就用第一张`, "cover")}
+        ${impChoice("weixin", "公众号发布形式", "新导入文章发到公众号的形式，素材里可单独改", [
+          ["", "贴图"],
+          ["article", "文章"],
+        ])}
+        <h4>视频和文章</h4>
+        ${impCheck("noTags", !imp.noTags, "识别 #标签 行", "单独一行、只含 #标签 的行（如 “#AI #MCP”）作标签并从正文、简介里去掉；“# 标题”“## 小节” 和代码块里的不算", true)}
+        <h4>同步文件夹</h4>
+        ${impChoice("videoOrder", "视频顺序", "同步时视频按这个顺序导入、定时发布；文件名按数字大小排（ep42 在 ep100 前）", [
+          ["", "文件名"],
+          ["created", "创建时间"],
+        ])}
+        ${impChoice("articleOrder", "文章顺序", "同步时文章按这个顺序导入、定时发布", [
+          ["", "创建时间"],
+          ["name", "文件名"],
+        ])}
+        ${impNum("settle", "自动同步等待", "定时发布前自动同步时，这么久内改过的文件（含字幕、封面、图片文件夹）留到下一次，免得发出没写完的；手动「同步」不等", 5, 1, 120, "分钟")}
       </div>
       <div class="section">
         <h3>更新</h3>
@@ -1183,6 +1246,9 @@ view.addEventListener("input", (e) => {
   if (out?.tagName === "OUTPUT") out.textContent = `${el.value}${key === "blur" ? "px" : "%"}`;
 });
 
+const saveImport = (change: Partial<SettingsInfo["settings"]["import"]>) =>
+  saveSettings((s) => (s.settings.import = { ...s.settings.import, ...change }));
+
 const saveUI = (change: Partial<NonNullable<SettingsInfo["settings"]["ui"]>>) =>
   saveSettings((s) => (s.settings.ui = { ...s.settings.ui, ...change }));
 
@@ -1193,6 +1259,11 @@ view.addEventListener("change", (e) => {
   const platform = cb.dataset.collection;
   if (platform) {
     return void saveSettings((s) => (s.settings.collections = { ...s.settings.collections, [platform]: cb.value.trim() }));
+  }
+  const field = cb.dataset.imp;
+  if (field) {
+    const v = cb.type === "checkbox" ? cb.checked !== ("neg" in cb.dataset) : cb.type === "number" ? Math.round(Number(cb.value)) || 0 : cb.value.trim();
+    return void saveImport({ [field]: v });
   }
   const id = cb.dataset.setting;
   if (!id) return;
@@ -1227,6 +1298,7 @@ view.addEventListener("click", async (e) => {
   if (d.accent !== undefined) return saveUI({ accent: d.accent });
   if (d.style !== undefined) return saveUI({ style: d.style });
   if (d.corner !== undefined) return saveUI({ corner: d.corner });
+  if (d.imp !== undefined && d.v !== undefined) return saveImport({ [d.imp]: d.v });
   if (d.zoom !== undefined) return saveUI({ zoom: d.zoom === "100" ? 0 : Number(d.zoom) });
   if (d.login) return login(d.login);
   if (d.check) {
@@ -1428,6 +1500,9 @@ view.addEventListener("click", async (e) => {
       if (!(await ask("主题色、风格、圆角、缩放和背景图片都恢复默认，深浅色不变。", { title: "恢复默认外观", ok: "恢复默认" }))) return;
       await attempt(() => Settings.clearBackground());
       return saveSettings((s) => (s.settings.ui = {}));
+    case "reset-import":
+      if (!(await ask("导入规则全部恢复默认，已导入的素材不受影响。", { title: "恢复默认导入规则", ok: "恢复默认" }))) return;
+      return saveSettings((s) => (s.settings.import = {}));
     case "check-update":
       return void Updates.check().catch(() => {}); // the row shows the error
     case "install-update": {

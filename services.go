@@ -92,7 +92,7 @@ func (l *Library) ImportPaths(paths []string) ([]store.Material, error) {
 			had = append(had, filepath.Base(p))
 			continue
 		}
-		m, ok, err := newMaterial(p)
+		m, ok, err := newMaterial(p, l.store.Settings().Import)
 		if err != nil {
 			return added, err
 		}
@@ -171,24 +171,25 @@ func (l *Library) SyncFolders() ([]store.Material, error) {
 	if len(l.store.Folders()) == 0 {
 		return nil, errors.New("还没有添加同步文件夹")
 	}
-	return l.sync(0)
+	return l.sync(false)
 }
 
-// settleTime is how long a file must have been left alone before the
-// schedule's own sync takes it: one still being written, or still waiting
-// for its caption, would be published as it is.
-const settleTime = 5 * time.Minute
-
-// sync is SyncFolders, leaving for later the files changed within quiet.
-// A file that cannot be read is left for later too, and is the error only
+// sync is SyncFolders, leaving for later, when settle, the files changed
+// within the settings' settle time, as the schedule's own sync does. A
+// file that cannot be read is left for later too, and is the error only
 // when nothing else came in.
-func (l *Library) sync(quiet time.Duration) ([]store.Material, error) {
+func (l *Library) sync(settle bool) ([]store.Material, error) {
+	im := l.store.Settings().Import
+	var quiet time.Duration
+	if settle {
+		quiet = importRules(im).settle()
+	}
 	added := []store.Material{}
 	var failed []string
 	for _, dir := range l.store.Folders() {
 		files, _ := l.newFiles(dir, quiet)
 		for _, p := range files {
-			m, _, err := newMaterial(p)
+			m, _, err := newMaterial(p, im)
 			if err != nil {
 				failed = append(failed, err.Error())
 				continue
@@ -208,9 +209,9 @@ func (l *Library) sync(quiet time.Duration) ([]store.Material, error) {
 // fresh reports whether the file at p, or one that goes with it, changed
 // within quiet: a video's caption and cover, an article's folder of
 // pictures.
-func fresh(p string, quiet time.Duration) bool {
+func fresh(p string, quiet time.Duration, r rules) bool {
 	stem := strings.TrimSuffix(p, filepath.Ext(p))
-	for _, f := range []string{p, stem + "_caption.txt", stem + ".txt", siblingCover(p), stem} {
+	for _, f := range append(r.captions(p), p, r.siblingCover(p), stem) {
 		if info, err := os.Stat(f); f != "" && err == nil && time.Since(info.ModTime()) < quiet {
 			return true
 		}
@@ -219,39 +220,49 @@ func fresh(p string, quiet time.Duration) bool {
 }
 
 // newFiles lists the files in dir, not its subfolders, to add on syncing,
-// but for those changed within quiet. Text files are left out: beside
-// videos they are captions.
+// but for those changed within quiet, in the order of the settings' rules.
+// Text files are left out: beside videos they are captions.
 func (l *Library) newFiles(dir string, quiet time.Duration) ([]string, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return nil, fmt.Errorf("读取同步文件夹失败：%w", err)
 	}
+	r := importRules(l.store.Settings().Import)
 	var videos, articles []string
 	created := map[string]time.Time{}
 	for _, e := range entries {
 		ext := strings.ToLower(strings.TrimPrefix(filepath.Ext(e.Name()), "."))
 		p := filepath.Join(dir, e.Name())
-		if !e.Type().IsRegular() || l.store.Imported(p) || (quiet > 0 && fresh(p, quiet)) {
+		if !e.Type().IsRegular() || l.store.Imported(p) || (quiet > 0 && fresh(p, quiet, r)) {
 			continue
 		}
-		if slices.Contains(videoExts, ext) {
+		isVideo := slices.Contains(videoExts, ext)
+		if !isVideo && ext != "md" && ext != "markdown" {
+			continue
+		}
+		if info, err := e.Info(); err == nil {
+			created[p] = createdAt(info)
+		}
+		if isVideo {
 			videos = append(videos, p)
-		} else if ext == "md" || ext == "markdown" {
-			if info, err := e.Info(); err == nil {
-				created[p] = createdAt(info)
-			}
+		} else {
 			articles = append(articles, p)
 		}
 	}
-	// Videos are numbered episodes (ep42 before ep100); articles are named
-	// by their titles, so they go by when they were made.
-	slices.SortFunc(videos, func(a, b string) int {
-		if naturalLess(a, b) {
-			return -1
+	order := func(files []string, by string) {
+		if by == "created" {
+			slices.SortStableFunc(files, func(a, b string) int { return created[a].Compare(created[b]) })
+			return
 		}
-		return 1
-	})
-	slices.SortStableFunc(articles, func(a, b string) int { return created[a].Compare(created[b]) })
+		slices.SortFunc(files, func(a, b string) int {
+			if naturalLess(filepath.Base(a), filepath.Base(b)) {
+				return -1
+			}
+			return 1
+		})
+	}
+	order(videos, r.VideoOrder)
+	order(articles, r.ArticleOrder)
 	return append(videos, articles...), nil
 }
 
@@ -677,21 +688,6 @@ func baseName(p string) string {
 	return strings.TrimSuffix(filepath.Base(p), filepath.Ext(p))
 }
 
-// siblingCover returns an image next to p with the same base name, or
-// that plus "_cover", so a cover exported beside a video is picked up on
-// import.
-func siblingCover(p string) string {
-	stem := strings.TrimSuffix(p, filepath.Ext(p))
-	for _, name := range []string{stem + "_cover", stem} {
-		for _, ext := range []string{".jpg", ".jpeg", ".png", ".webp"} {
-			if _, err := os.Stat(name + ext); err == nil {
-				return name + ext
-			}
-		}
-	}
-	return ""
-}
-
 // splitTitle takes a leading "# " heading off a Markdown document.
 func splitTitle(doc string) (title, body string) {
 	doc = strings.TrimPrefix(doc, "\ufeff")
@@ -879,6 +875,9 @@ func (x *Settings) Save(st store.Settings, openAtLogin bool) (SettingsInfo, erro
 	if err != nil {
 		return SettingsInfo{}, err
 	}
+	if st.Import, err = cleanImport(st.Import); err != nil {
+		return SettingsInfo{}, err
+	}
 	// The background changes only through PickBackground, which copies
 	// the file into the app's folder.
 	ui.Background = x.store.Settings().UI.Background
@@ -912,6 +911,40 @@ func cleanUI(ui store.UI) (store.UI, error) {
 	ui.Panel = min(max(ui.Panel, 0), 90)
 	ui.Blur = min(max(ui.Blur, 0), 30)
 	return ui, nil
+}
+
+// cleanImport checks the import rules and keeps the numbers in range.
+func cleanImport(im store.Import) (store.Import, error) {
+	for _, f := range []*string{&im.CoverSuffix, &im.CaptionSuffix, &im.ImageCover} {
+		*f = strings.TrimSpace(*f)
+		if strings.ContainsAny(*f, `/\:*?"<>|`) {
+			return im, fmt.Errorf("文件名里不能有 %q", *f)
+		}
+	}
+	if im.Statement != "" && !slices.Contains(statements, im.Statement) {
+		return im, fmt.Errorf("未知的创作声明 %q", im.Statement)
+	}
+	if !slices.Contains([]string{"", "article"}, im.Weixin) {
+		return im, fmt.Errorf("未知的公众号发布形式 %q", im.Weixin)
+	}
+	for _, o := range []string{im.VideoOrder, im.ArticleOrder} {
+		if !slices.Contains([]string{"", "name", "created"}, o) {
+			return im, fmt.Errorf("未知的排序 %q", o)
+		}
+	}
+	if im.TitleMin != 0 {
+		im.TitleMin = min(max(im.TitleMin, 2), 30)
+	}
+	if im.TitleMax != 0 {
+		im.TitleMax = min(max(im.TitleMax, 10), 100)
+	}
+	if r := importRules(im); r.TitleMin > r.TitleMax {
+		return im, fmt.Errorf("标题最短 %d 字超过了最长 %d 字", r.TitleMin, r.TitleMax)
+	}
+	if im.Settle != 0 {
+		im.Settle = min(max(im.Settle, 1), 120)
+	}
+	return im, nil
 }
 
 // backgroundsDir holds the background images, served to the page by the

@@ -5,10 +5,12 @@ import (
 	"path/filepath"
 	"slices"
 	"testing"
+
+	"publisher/internal/store"
 )
 
 func TestParseCaption(t *testing.T) {
-	c := parseCaption("\ufeff跟你聊天的是人还是 AI？七十多年前的图灵测试，AI 已经过了吗？🤖\n\n#AI #人工智能 #图灵测试 #ChatGPT #科技史 #涨知识\n")
+	c := importRules(store.Import{}).parseCaption("\ufeff跟你聊天的是人还是 AI？七十多年前的图灵测试，AI 已经过了吗？🤖\n\n#AI #人工智能 #图灵测试 #ChatGPT #科技史 #涨知识\n")
 	if c.title != "跟你聊天的是人还是 AI？" {
 		t.Errorf("title = %q", c.title)
 	}
@@ -46,7 +48,7 @@ func TestNewMaterialReadsArticleTags(t *testing.T) {
 	if err := os.WriteFile(md, []byte("# AI 圈天天在说的 MCP 是什么？\n\n正文……\n\n#AI #MCP #人工智能 #涨知识\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	m, ok, err := newMaterial(md)
+	m, ok, err := newMaterial(md, store.Import{})
 	if err != nil || !ok {
 		t.Fatal(ok, err)
 	}
@@ -66,7 +68,7 @@ func TestCaptionTitle(t *testing.T) {
 		"扣子（Coze）：字节跳动 2024 年 2 月上线的智能体搭建平台。用拖拽搭 AI 应用":                    "扣子（Coze）：字节跳动 2024 年 2 月上线的智能体搭建平台",
 		"没有标点也没有分句的一段很长很长很长很长很长很长很长很长很长的文字":                                "没有标点也没有分句的一段很长很长很长很长很长很长很长很长很长的文字",
 	} {
-		if got := captionTitle(in); got != want {
+		if got := captionTitle(in, 10, 30); got != want {
 			t.Errorf("captionTitle(%q) = %q, want %q", in, got, want)
 		}
 	}
@@ -83,7 +85,7 @@ func TestNewMaterialReadsCaptionAndCover(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	m, ok, err := newMaterial(filepath.Join(dir, "ep42_mcp.mp4"))
+	m, ok, err := newMaterial(filepath.Join(dir, "ep42_mcp.mp4"), store.Import{})
 	if err != nil || !ok {
 		t.Fatal(ok, err)
 	}
@@ -122,7 +124,7 @@ func TestArticleImages(t *testing.T) {
 	if err := os.WriteFile(md, []byte("# 标题\n\n正文 ![](文章/1.jpg)\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	m, ok, err := newMaterial(md)
+	m, ok, err := newMaterial(md, store.Import{})
 	if err != nil || !ok {
 		t.Fatal(ok, err)
 	}
@@ -139,7 +141,56 @@ func TestArticleImages(t *testing.T) {
 
 	// Without a cover picture, the first one is the cover.
 	os.Remove(filepath.Join(pics, "cover.jpg"))
-	if m, _, _ = newMaterial(md); m.CoverPath != filepath.Join(pics, "1.jpg") {
+	if m, _, _ = newMaterial(md, store.Import{}); m.CoverPath != filepath.Join(pics, "1.jpg") {
 		t.Errorf("cover without cover.jpg = %q", m.CoverPath)
+	}
+}
+
+// TestImportRules reads files by the settings' rules in place of the
+// defaults.
+func TestImportRules(t *testing.T) {
+	dir := t.TempDir()
+	for name, body := range map[string]string{
+		"ep1.mp4":       "",
+		"ep1-封面.png":    "",
+		"ep1_cover.jpg": "",
+		"ep1-字幕.txt":    "很长的第一句话已经超过了十个字。第二句。\n#AI\n",
+		"文章.md":         "# 标题\n\n正文\n\n#AI\n",
+		"文章/首图.jpg":     "",
+		"文章/1.jpg":      "",
+	} {
+		os.MkdirAll(filepath.Dir(filepath.Join(dir, name)), 0o755)
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	im := store.Import{CoverSuffix: "-封面", CaptionSuffix: "-字幕", Statement: statements[1], ImageCover: "首图", Weixin: "article"}
+	v, _, _ := newMaterial(filepath.Join(dir, "ep1.mp4"), im)
+	if v.CoverPath != filepath.Join(dir, "ep1-封面.png") || v.Title != "很长的第一句话已经超过了十个字" || v.Statement != statements[1] || !slices.Equal(v.Tags, []string{"AI"}) {
+		t.Errorf("video = %+v", v)
+	}
+	if !importRules(im).isCaption(filepath.Join(dir, "ep1-字幕.txt")) {
+		t.Error("caption with its suffix taken for an article")
+	}
+	a, _, _ := newMaterial(filepath.Join(dir, "文章.md"), im)
+	if a.CoverPath != filepath.Join(dir, "文章", "首图.jpg") || a.WeixinType != "" || a.Title != "标题" {
+		t.Errorf("article = %+v", a)
+	}
+
+	// Everything off: names for titles, text kept as it is.
+	im = store.Import{NoCaption: true, NoHeading: true, NoTags: true, NoImages: true}
+	v, _, _ = newMaterial(filepath.Join(dir, "ep1.mp4"), im)
+	if v.Title != "ep1" || v.Description != "" || len(v.Tags) != 0 {
+		t.Errorf("video, rules off = %+v", v)
+	}
+	a, _, _ = newMaterial(filepath.Join(dir, "文章.md"), im)
+	if a.Title != "文章" || a.Body != "# 标题\n\n正文\n\n#AI\n" || len(a.Tags) != 0 || len(a.Images) != 0 || a.CoverPath != "" {
+		t.Errorf("article, rules off = %+v", a)
+	}
+
+	// The file name for the title, the caption still for the rest.
+	v, _, _ = newMaterial(filepath.Join(dir, "ep1.mp4"), store.Import{CaptionSuffix: "-字幕", NameTitle: true})
+	if v.Title != "ep1" || v.Description == "" {
+		t.Errorf("video, name title = %+v", v)
 	}
 }

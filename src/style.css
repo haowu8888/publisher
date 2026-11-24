@@ -314,6 +314,12 @@ input.num { width: 72px; border: 1px solid var(--line); background: var(--panel)
 .setting { cursor: default; }
 label.setting { cursor: pointer; }
 .setting input.setting-text { width: 220px; flex: none; }
+.setting input.setting-text.short { width: 140px; }
+.setting .row { flex: none; flex-wrap: nowrap; color: var(--muted); }
+/* The import rules' groups: video, article, sync folders. */
+.section h4 { margin: 8px 0 -4px; font-size: 13px; color: var(--muted); font-weight: 600; }
+.section h4 + .setting { border-top: none; }
+.spacer { flex: 1; }
 .setting .row-buttons { display: flex; gap: 8px; flex: none; }
 .setting .err { color: var(--bad); }
 .segmented { display: inline-flex; border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 2px; background: var(--panel-2); flex: none; }

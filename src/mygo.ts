@@ -34,6 +34,24 @@ export interface FolderInfo {
   error?: string;
 }
 
+export interface Import {
+  coverSuffix?: string;
+  noCaption?: boolean;
+  captionSuffix?: string;
+  nameTitle?: boolean;
+  titleMin?: number;
+  titleMax?: number;
+  statement?: string;
+  noHeading?: boolean;
+  noTags?: boolean;
+  noImages?: boolean;
+  imageCover?: string;
+  weixin?: string;
+  settle?: number;
+  videoOrder?: string;
+  articleOrder?: string;
+}
+
 export type Kind = string;
 
 export interface Limits {
@@ -105,6 +123,7 @@ export interface Settings {
   quote?: string;
   autoSync?: boolean;
   noUpdateCheck?: boolean;
+  import: Import;
   ui: UI;
 }
 

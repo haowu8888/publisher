@@ -65,7 +65,7 @@ func main() {
 		if !s.Settings().AutoSync {
 			return
 		}
-		if _, err := library.sync(settleTime); err != nil {
+		if _, err := library.sync(true); err != nil {
 			log.Println("sync:", err)
 		}
 	}

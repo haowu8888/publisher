@@ -12,41 +12,105 @@ import (
 	"publisher/internal/store"
 )
 
+// rules are the settings' import rules with the defaults filled in.
+type rules struct{ store.Import }
+
+func importRules(im store.Import) rules {
+	r := rules{im}
+	if r.CoverSuffix == "" {
+		r.CoverSuffix = "_cover"
+	}
+	if r.CaptionSuffix == "" {
+		r.CaptionSuffix = "_caption"
+	}
+	if r.TitleMin == 0 {
+		r.TitleMin = 10
+	}
+	if r.TitleMax == 0 {
+		r.TitleMax = 30
+	}
+	if r.Statement == "" {
+		// Most videos here need no label; the user can change it.
+		r.Statement = statements[0]
+	}
+	if r.ImageCover == "" {
+		r.ImageCover = "cover"
+	}
+	if r.Settle == 0 {
+		r.Settle = 5
+	}
+	if r.VideoOrder == "" {
+		// Videos are numbered episodes (ep42 before ep100).
+		r.VideoOrder = "name"
+	}
+	if r.ArticleOrder == "" {
+		// Articles are named by their titles, so they go by when they
+		// were made.
+		r.ArticleOrder = "created"
+	}
+	return r
+}
+
+// settle is how long a file must have been left alone before the
+// schedule's own sync takes it: one still being written, or still waiting
+// for its caption, would be published as it is.
+func (r rules) settle() time.Duration { return time.Duration(r.Settle) * time.Minute }
+
+// captions are the files the caption of the video at p may be in.
+func (r rules) captions(p string) []string {
+	stem := strings.TrimSuffix(p, filepath.Ext(p))
+	return []string{stem + r.CaptionSuffix + ".txt", stem + ".txt"}
+}
+
 // newMaterial makes a material of the video or article at p, or returns
-// false for another kind of file, as a video's caption. A video takes its title, description and
-// tags from a caption file beside it ("x_caption.txt" or "x.txt"); an
-// article's first "# " heading becomes its title, and its lines of "#tag"s
-// its tags.
-func newMaterial(p string) (store.Material, bool, error) {
-	m := store.Material{ID: store.NewID(), Title: baseName(p), Tags: []string{}, CoverPath: siblingCover(p), CreatedAt: time.Now()}
+// false for another kind of file, as a video's caption. A video takes its
+// title, description and tags from a caption file beside it
+// ("x_caption.txt" or "x.txt"); an article's first "# " heading becomes its
+// title, and its lines of "#tag"s its tags. The settings' rules (im) can
+// change or turn off each.
+func newMaterial(p string, im store.Import) (store.Material, bool, error) {
+	r := importRules(im)
+	m := store.Material{ID: store.NewID(), Title: baseName(p), Tags: []string{}, CoverPath: r.siblingCover(p), CreatedAt: time.Now()}
 	ext := strings.ToLower(strings.TrimPrefix(filepath.Ext(p), "."))
 	switch {
 	case slices.Contains(videoExts, ext):
-		// Most videos here need no label; the user can change it.
-		m.Kind, m.VideoPath, m.Statement = store.KindVideo, p, statements[0]
-		if c, ok := readCaption(p); ok {
-			m.Title, m.Description, m.Tags = c.title, c.description, c.tags
+		m.Kind, m.VideoPath, m.Statement = store.KindVideo, p, r.Statement
+		if c, ok := r.readCaption(p); ok {
+			m.Description, m.Tags = c.description, c.tags
+			if !r.NameTitle && c.title != "" {
+				m.Title = c.title
+			}
 		}
 	case slices.Contains(articleExts, ext):
-		if ext == "txt" && isCaption(p) {
+		if ext == "txt" && r.isCaption(p) {
 			return m, false, nil
 		}
 		b, err := os.ReadFile(p)
 		if err != nil {
 			return m, false, err
 		}
-		title, body := splitTitle(string(b))
-		if title != "" {
-			m.Title = title
+		body := strings.TrimPrefix(string(b), "\ufeff")
+		if !r.NoHeading {
+			var title string
+			if title, body = splitTitle(body); title != "" {
+				m.Title = title
+			}
 		}
-		body, m.Tags = articleTags(body)
+		if !r.NoTags {
+			body, m.Tags = articleTags(body)
+		}
 		m.Kind, m.ArticlePath, m.Body = store.KindArticle, p, body
-		// The user's articles go to the official account as picture posts.
-		m.WeixinType = "images"
-		var cover string
-		m.Images, cover = articleImages(p)
-		if m.CoverPath == "" {
-			m.CoverPath = cover
+		if r.Weixin == "" {
+			// The user's articles go to the official account as picture
+			// posts.
+			m.WeixinType = "images"
+		}
+		if !r.NoImages {
+			var cover string
+			m.Images, cover = r.articleImages(p)
+			if m.CoverPath == "" {
+				m.CoverPath = cover
+			}
 		}
 	default:
 		return m, false, nil
@@ -54,10 +118,25 @@ func newMaterial(p string) (store.Material, bool, error) {
 	return m, true, nil
 }
 
+// siblingCover returns an image next to p with the same base name, or
+// that plus the cover suffix, so a cover exported beside a video is picked
+// up on import.
+func (r rules) siblingCover(p string) string {
+	stem := strings.TrimSuffix(p, filepath.Ext(p))
+	for _, name := range []string{stem + r.CoverSuffix, stem} {
+		for _, ext := range imageExts {
+			if _, err := os.Stat(name + "." + ext); err == nil {
+				return name + "." + ext
+			}
+		}
+	}
+	return ""
+}
+
 // articleImages returns the pictures in the folder beside the article at
 // p with its name, in natural order, and its cover: the one named
-// "cover", else the first.
-func articleImages(p string) (images []string, cover string) {
+// ImageCover, else the first.
+func (r rules) articleImages(p string) (images []string, cover string) {
 	dir := strings.TrimSuffix(p, filepath.Ext(p))
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -68,7 +147,7 @@ func articleImages(p string) (images []string, cover string) {
 			continue
 		}
 		f := filepath.Join(dir, e.Name())
-		if strings.EqualFold(baseName(f), "cover") {
+		if strings.EqualFold(baseName(f), r.ImageCover) {
 			cover = f
 			continue
 		}
@@ -100,11 +179,13 @@ type caption struct {
 
 // readCaption reads the caption file of the video at p: its text is the
 // description, lines of "#tag"s are the tags.
-func readCaption(p string) (caption, bool) {
-	stem := strings.TrimSuffix(p, filepath.Ext(p))
-	for _, name := range []string{stem + "_caption.txt", stem + ".txt"} {
+func (r rules) readCaption(p string) (caption, bool) {
+	if r.NoCaption {
+		return caption{}, false
+	}
+	for _, name := range r.captions(p) {
 		if b, err := os.ReadFile(name); err == nil {
-			return parseCaption(string(b)), true
+			return r.parseCaption(string(b)), true
 		}
 	}
 	return caption{}, false
@@ -112,10 +193,11 @@ func readCaption(p string) (caption, bool) {
 
 // isCaption reports whether the text file at p is the caption of a video
 // beside it, where readCaption looks for one, and so no article: dropped
-// on the window with its video, it would be published as one.
-func isCaption(p string) bool {
+// on the window with its video, it would be published as one. That holds
+// with captions unread too.
+func (r rules) isCaption(p string) bool {
 	stem := strings.TrimSuffix(p, filepath.Ext(p))
-	for _, video := range []string{stem, strings.TrimSuffix(stem, "_caption")} {
+	for _, video := range []string{stem, strings.TrimSuffix(stem, r.CaptionSuffix)} {
 		for _, ext := range videoExts {
 			if _, err := os.Stat(video + "." + ext); err == nil {
 				return true
@@ -125,18 +207,18 @@ func isCaption(p string) bool {
 	return false
 }
 
-func parseCaption(s string) caption {
+func (r rules) parseCaption(s string) caption {
 	var text []string
 	var tags []string
 	for line := range strings.Lines(strings.TrimPrefix(s, "\ufeff")) {
-		if isTagLine(line) {
+		if !r.NoTags && isTagLine(line) {
 			tags = append(tags, strings.Fields(line)...)
 			continue
 		}
 		text = append(text, strings.TrimRight(line, "\r\n"))
 	}
 	desc := strings.TrimSpace(strings.Join(text, "\n"))
-	return caption{title: captionTitle(desc), description: desc, tags: cleanTags(tags)}
+	return caption{title: captionTitle(desc, r.TitleMin, r.TitleMax), description: desc, tags: cleanTags(tags)}
 }
 
 // isTagLine reports whether a line holds only "#tag"s. A Markdown heading
@@ -178,23 +260,24 @@ func articleTags(body string) (string, []string) {
 }
 
 // captionTitle picks a title from a caption: its first sentence, with the
-// next ones while it is under 10 characters, cut back to whole clauses when
-// it runs over 30 (or 40, should 30 leave too little).
-func captionTitle(s string) string {
+// next ones while it is under least characters (10), cut back to whole
+// clauses when it runs over most (30), or a third more should that leave
+// too little.
+func captionTitle(s string, least, most int) string {
 	var title string
-	for rest := strings.TrimSpace(s); rest != "" && utf8.RuneCountInString(title) < 10; {
+	for rest := strings.TrimSpace(s); rest != "" && utf8.RuneCountInString(title) < least; {
 		var sentence string
 		sentence, rest = cutSentence(rest)
 		title = trimEnd(title + sentence)
 	}
-	if utf8.RuneCountInString(title) <= 30 {
+	if utf8.RuneCountInString(title) <= most {
 		return title
 	}
-	c := wholeClauses(title, 30)
-	if utf8.RuneCountInString(c) < 12 {
-		c = wholeClauses(title, 40)
+	c := wholeClauses(title, most)
+	if utf8.RuneCountInString(c) < most*2/5 {
+		c = wholeClauses(title, most+most/3)
 	}
-	if utf8.RuneCountInString(c) < 8 {
+	if utf8.RuneCountInString(c) < most*4/15 {
 		return title
 	}
 	return c

@@ -14,7 +14,7 @@ import (
 // its articles in the order they were made, whatever their names.
 func TestNewFiles(t *testing.T) {
 	dir := t.TempDir()
-	for _, name := range []string{"乙.md", "ep10.mp4", "甲.md", "ep2.mp4", "notes.txt"} {
+	for _, name := range []string{"甲.md", "ep10.mp4", "乙.md", "ep2.mp4", "notes.txt"} {
 		if err := os.WriteFile(filepath.Join(dir, name), nil, 0o644); err != nil {
 			t.Fatal(err)
 		}
@@ -37,8 +37,22 @@ func TestNewFiles(t *testing.T) {
 	for i := range files {
 		files[i] = filepath.Base(files[i])
 	}
-	if want := []string{"ep2.mp4", "ep10.mp4", "乙.md", "甲.md"}; !slices.Equal(files, want) {
+	if want := []string{"ep2.mp4", "ep10.mp4", "甲.md", "乙.md"}; !slices.Equal(files, want) {
 		t.Errorf("got %q, want %q", files, want)
+	}
+
+	// The settings turn the orders round.
+	st := s.Settings()
+	st.Import.VideoOrder, st.Import.ArticleOrder = "created", "name"
+	if err := s.SetSettings(st); err != nil {
+		t.Fatal(err)
+	}
+	files, _ = l.newFiles(dir, 0)
+	for i := range files {
+		files[i] = filepath.Base(files[i])
+	}
+	if want := []string{"ep10.mp4", "ep2.mp4", "乙.md", "甲.md"}; !slices.Equal(files, want) {
+		t.Errorf("by settings: got %q, want %q", files, want)
 	}
 }
 

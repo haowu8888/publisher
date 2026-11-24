@@ -165,8 +165,55 @@ type Settings struct {
 	AutoSync bool `json:"autoSync,omitempty"`
 	// NoUpdateCheck stops the app looking for a newer build by itself.
 	NoUpdateCheck bool `json:"noUpdateCheck,omitempty"`
+	// Import is how imported and synced files become materials.
+	Import Import `json:"import"`
 	// UI is the look: colors, style, background.
 	UI UI `json:"ui"`
+}
+
+// Import is how imported and synced files become materials; zero values
+// are the defaults, which main fills in.
+type Import struct {
+	// CoverSuffix is what a video's or article's cover image adds to its
+	// name ("_cover"); an image of the very name is its cover too.
+	CoverSuffix string `json:"coverSuffix,omitempty"`
+	// NoCaption leaves videos' caption files unread.
+	NoCaption bool `json:"noCaption,omitempty"`
+	// CaptionSuffix is what a video's caption file adds to its name
+	// ("_caption"), before ".txt"; a .txt of the very name is one too.
+	CaptionSuffix string `json:"captionSuffix,omitempty"`
+	// NameTitle keeps a video's file name as its title, rather than one
+	// taken from its caption.
+	NameTitle bool `json:"nameTitle,omitempty"`
+	// TitleMin and TitleMax are the lengths of a title taken from a
+	// caption: sentences join while under TitleMin (10), and it is cut back
+	// to whole clauses when over TitleMax (30).
+	TitleMin int `json:"titleMin,omitempty"`
+	TitleMax int `json:"titleMax,omitempty"`
+	// Statement is the creation statement new videos take (the first of
+	// Bilibili's).
+	Statement string `json:"statement,omitempty"`
+	// NoHeading keeps an article's file name as its title, and its "# "
+	// heading in its body.
+	NoHeading bool `json:"noHeading,omitempty"`
+	// NoTags leaves lines of "#tag"s in captions and articles as text.
+	NoTags bool `json:"noTags,omitempty"`
+	// NoImages leaves the folder of pictures beside an article alone.
+	NoImages bool `json:"noImages,omitempty"`
+	// ImageCover is the name of the cover in an article's folder of
+	// pictures ("cover"), else the first is.
+	ImageCover string `json:"imageCover,omitempty"`
+	// Weixin is how articles go to the official account: "" as picture
+	// posts, "article" as articles.
+	Weixin string `json:"weixin,omitempty"`
+	// Settle is how many minutes a file must have been left alone before
+	// the schedule's own sync takes it (5).
+	Settle int `json:"settle,omitempty"`
+	// VideoOrder and ArticleOrder are the order a sync folder's files come
+	// in: "name" for names with their numbers by value, "created" for when
+	// they were made; videos go by name, articles by creation.
+	VideoOrder   string `json:"videoOrder,omitempty"`
+	ArticleOrder string `json:"articleOrder,omitempty"`
 }
 
 // UI is the look of the app beyond light and dark; zero values are the
