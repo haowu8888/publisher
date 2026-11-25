@@ -60,8 +60,8 @@ func checkYidian(m store.Material, mode store.Mode) error {
 	if mode != store.ModeAuto {
 		return nil
 	}
-	if n := utf8.RuneCountInString(strings.TrimSpace(m.Title)); n < ydTitleMin {
-		return fmt.Errorf("一点号标题至少 %d 个字，「%s」只有 %d 个字", ydTitleMin, m.Title, n)
+	if n := halfLen(strings.TrimSpace(m.Title)); n < ydTitleMin {
+		return fmt.Errorf("一点号标题至少 %d 个字（两个英文字母算一个字），「%s」只有 %g 个字", ydTitleMin, m.Title, n)
 	}
 	return nil
 }

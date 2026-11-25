@@ -56,8 +56,8 @@ func checkSohuhao(m store.Material, mode store.Mode) error {
 	if mode != store.ModeAuto {
 		return nil
 	}
-	if n := utf8.RuneCountInString(strings.TrimSpace(m.Title)); n < shTitleMin {
-		return fmt.Errorf("搜狐号标题至少 %d 个字，「%s」只有 %d 个字", shTitleMin, m.Title, n)
+	if n := halfLen(strings.TrimSpace(m.Title)); n < shTitleMin {
+		return fmt.Errorf("搜狐号标题至少 %d 个字（两个英文字母算一个字），「%s」只有 %g 个字", shTitleMin, m.Title, n)
 	}
 	return nil
 }

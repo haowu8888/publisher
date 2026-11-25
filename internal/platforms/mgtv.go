@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"publisher/internal/browser"
 	"publisher/internal/store"
@@ -106,14 +105,14 @@ func checkMgtv(m store.Material, mode store.Mode) error {
 	if mode != store.ModeAuto {
 		return nil
 	}
-	if n := utf8.RuneCountInString(strings.TrimSpace(m.Title)); n < mgtvTitleMin {
-		return fmt.Errorf("芒果TV标题至少 %d 个字，「%s」只有 %d 个字", mgtvTitleMin, m.Title, n)
+	if n := halfLen(strings.TrimSpace(m.Title)); n < mgtvTitleMin {
+		return fmt.Errorf("芒果TV标题至少 %d 个字（两个英文字母算一个字），「%s」只有 %g 个字", mgtvTitleMin, m.Title, n)
 	}
 	return nil
 }
 
 // mgtvTags types the tags into the tag box, each ended with Enter. Mango
-// TV takes 5 at most, each 2 to 8 long as it counts (mgtvTagLen): others
+// TV takes 5 at most, each 2 to 8 long as it counts (halfLen): others
 // are left out.
 func mgtvTags(ctx context.Context, page *rod.Page, tags []string) error {
 	in, err := find(page, `.video-tag input.el-select__input`, 10*time.Second)
@@ -125,7 +124,7 @@ func mgtvTags(ctx context.Context, page *rod.Page, tags []string) error {
 		if n == 5 {
 			break
 		}
-		if l := mgtvTagLen(t); l < 2 || l > 8 {
+		if l := halfLen(t); l < 2 || l > 8 {
 			continue
 		}
 		n++
@@ -146,20 +145,6 @@ func mgtvTags(ctx context.Context, page *rod.Page, tags []string) error {
 		}
 	}
 	return nil
-}
-
-// mgtvTagLen is a tag's length as Mango TV counts it: half a character
-// for each ASCII one, so "AI" is too short and "LangChain" fits.
-func mgtvTagLen(t string) float64 {
-	n := 0.0
-	for _, r := range t {
-		if r < utf8.RuneSelf {
-			n += 0.5
-		} else {
-			n++
-		}
-	}
-	return n
 }
 
 // mgtvStatement picks the material's statement (创作声明), which Mango TV

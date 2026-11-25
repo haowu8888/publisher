@@ -68,8 +68,8 @@ func checkNetease(m store.Material, mode store.Mode) error {
 	if mode != store.ModeAuto {
 		return nil
 	}
-	if n := utf8.RuneCountInString(strings.TrimSpace(m.Title)); n < neTitleMin {
-		return fmt.Errorf("网易号标题至少 %d 个字，「%s」只有 %d 个字", neTitleMin, m.Title, n)
+	if n := halfLen(strings.TrimSpace(m.Title)); n < neTitleMin {
+		return fmt.Errorf("网易号标题至少 %d 个字（两个英文字母算一个字），「%s」只有 %g 个字", neTitleMin, m.Title, n)
 	}
 	return nil
 }

@@ -90,11 +90,11 @@ func TestIqiyiText(t *testing.T) {
 	}
 }
 
-// TestMgtvTagLen counts ASCII as half a character, as Mango TV does.
-func TestMgtvTagLen(t *testing.T) {
+// TestHalfLen counts ASCII as half a character, as Mango TV does.
+func TestHalfLen(t *testing.T) {
 	for in, want := range map[string]float64{"AI": 1, "人工智能": 4, "LangChain": 4.5, "AI开发": 3} {
-		if got := mgtvTagLen(in); got != want {
-			t.Errorf("mgtvTagLen(%q) = %v, want %v", in, got, want)
+		if got := halfLen(in); got != want {
+			t.Errorf("halfLen(%q) = %v, want %v", in, got, want)
 		}
 	}
 }
@@ -116,10 +116,11 @@ func TestNeHeading(t *testing.T) {
 	}
 }
 
-// TestCheckTitleMin refuses, ahead of the form, titles NetEase, Yidian and Sohu
-// turn down as too short when submitted by themselves.
+// TestCheckTitleMin refuses, ahead of the form, titles NetEase, Yidian, Sohu
+// and Mango TV turn down as too short when submitted by themselves, counting
+// two ASCII characters as one.
 func TestCheckTitleMin(t *testing.T) {
-	for name, check := range map[string]func(store.Material, store.Mode) error{"netease": checkNetease, "yidian": checkYidian, "sohuhao": checkSohuhao} {
+	for name, check := range map[string]func(store.Material, store.Mode) error{"netease": checkNetease, "yidian": checkYidian, "sohuhao": checkSohuhao, "mgtv": checkMgtv} {
 		short := store.Material{Kind: store.KindArticle, Title: "四个字的"}
 		if check(short, store.ModeAuto) == nil {
 			t.Errorf("%s: a 4-character title passed", name)
@@ -129,6 +130,12 @@ func TestCheckTitleMin(t *testing.T) {
 		}
 		if err := check(store.Material{Kind: store.KindVideo, Title: "五个字标题"}, store.ModeAuto); err != nil {
 			t.Errorf("%s: a 5-character title refused: %v", name, err)
+		}
+		if check(store.Material{Kind: store.KindVideo, Title: "Anthropic"}, store.ModeAuto) == nil {
+			t.Errorf("%s: a 9-letter English title passed", name)
+		}
+		if err := check(store.Material{Kind: store.KindVideo, Title: "Claude Code"}, store.ModeAuto); err != nil {
+			t.Errorf("%s: an 11-letter English title refused: %v", name, err)
 		}
 	}
 }

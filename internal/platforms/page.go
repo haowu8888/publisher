@@ -15,6 +15,7 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"publisher/internal/browser"
 	"publisher/internal/store"
@@ -911,4 +912,20 @@ func hashtags(tags []string) string {
 		b.WriteString("#" + t + " ")
 	}
 	return b.String()
+}
+
+// halfLen is a text's length as the platforms that count two ASCII
+// characters as one Chinese character see it (Mango TV, NetEase, Sohu,
+// Yidian): "AI" is 1, "LangChain" 4.5, so "Anthropic" is too short a title
+// where 5 characters are the least.
+func halfLen(t string) float64 {
+	n := 0.0
+	for _, r := range t {
+		if r < utf8.RuneSelf {
+			n += 0.5
+		} else {
+			n++
+		}
+	}
+	return n
 }
