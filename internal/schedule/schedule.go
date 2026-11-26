@@ -93,6 +93,27 @@ func Next(sc store.Schedule, k store.Kind, now time.Time) time.Time {
 	return next
 }
 
+// Runs returns the first n runs of kind k after now, in order, or none if
+// it has no times set.
+func Runs(sc store.Schedule, k store.Kind, now time.Time, n int) []time.Time {
+	var day []time.Time
+	for _, t := range sc.Times[k] {
+		if at, err := today(t, now); err == nil {
+			day = append(day, at)
+		}
+	}
+	slices.SortFunc(day, func(a, b time.Time) int { return a.Compare(b) })
+	var out []time.Time
+	for d := 0; len(day) > 0 && len(out) < n; d++ {
+		for _, at := range day {
+			if at = at.AddDate(0, 0, d); at.After(now) && len(out) < n {
+				out = append(out, at)
+			}
+		}
+	}
+	return out
+}
+
 // Pending returns the materials the schedule would publish, the first
 // imported first: those it never queued, never published anywhere, with no
 // publish under way, and with a platform set for their kind.

@@ -325,9 +325,7 @@ func mouseClick(ctx context.Context, page *rod.Page, sel, text string, wait time
 			return [...document.querySelectorAll(sel)].find((e) => e.getClientRects().length && re.test(e.textContent.trim())) ?? null;
 		}`, sel, text))
 		if err == nil {
-			// A real click waits for animation frames, as focus says.
-			browser.Show(page)
-			return el.CancelTimeout().Sleeper(rod.DefaultSleeper).Timeout(evalTimeout).Click("left", 1)
+			return realClick(page, el.CancelTimeout())
 		}
 		if time.Now().After(deadline) {
 			return fmt.Errorf("未找到「%s」按钮", strings.Trim(text, "^$"))
@@ -336,6 +334,20 @@ func mouseClick(ctx context.Context, page *rod.Page, sel, text string, wait time
 			return err
 		}
 	}
+}
+
+// realClick clicks el with the mouse, as a user would. Its window is shown
+// first, a real click waiting for animation frames, as focus says, and it
+// is scrolled to the middle: at an edge a fixed bar (知乎's 发布设置) may
+// cover it. Either way rod's Click would wait for ever, so it has
+// evalTimeout.
+func realClick(page *rod.Page, el *rod.Element) error {
+	browser.Show(page)
+	el = el.Sleeper(rod.DefaultSleeper).Timeout(evalTimeout)
+	if _, err := el.Eval(`() => this.scrollIntoView({ block: "center" })`); err != nil {
+		return err
+	}
+	return el.Click(proto.InputMouseButtonLeft, 1)
 }
 
 // clickUntilGone clicks the visible element matching sel and text every
@@ -445,15 +457,11 @@ func clearMarker(ctx context.Context, page *rod.Page, sel, mark string) error {
 		if err != nil {
 			return fmt.Errorf("正文里找不到%s", mark)
 		}
-		browser.Show(page)
-		if err := el.ScrollIntoView(); err != nil {
-			return err
-		}
-		if err := sleep(ctx, 300*time.Millisecond); err != nil {
-			return err
-		}
-		if err := el.Click(proto.InputMouseButtonLeft, 1); err != nil {
-			return err
+		if err := realClick(page, el); err != nil {
+			if try == 2 {
+				return fmt.Errorf("点不到正文里的%s: %w", mark, err)
+			}
+			continue
 		}
 		if err := page.Keyboard.Type(input.End); err != nil {
 			return err

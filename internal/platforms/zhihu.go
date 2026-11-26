@@ -16,7 +16,6 @@ import (
 
 	"github.com/go-rod/rod"
 	"github.com/go-rod/rod/lib/input"
-	"github.com/go-rod/rod/lib/proto"
 )
 
 // publishZhihu publishes on Zhihu (知乎): a video (视频), or an article as a
@@ -664,11 +663,7 @@ func zhImageStored(ctx context.Context, page *rod.Page, n int) error {
 				retries++
 				el, err := find(page, failed, evalTimeout)
 				if err == nil {
-					browser.Show(page)
-					el = el.Timeout(evalTimeout)
-					if err = el.ScrollIntoView(); err == nil {
-						err = el.Click(proto.InputMouseButtonLeft, 1)
-					}
+					err = realClick(page, el)
 				}
 				if err != nil {
 					return fmt.Errorf("上传失败，点击重试也失败: %w", err)

@@ -1,6 +1,7 @@
 package schedule
 
 import (
+	"slices"
 	"testing"
 	"time"
 
@@ -45,6 +46,19 @@ func TestNext(t *testing.T) {
 	}
 	if got, want := Next(sc, store.KindArticle, now), time.Date(2026, 11, 10, 22, 0, 0, 0, time.Local); !got.Equal(want) {
 		t.Errorf("Next article = %s, want %s", got, want)
+	}
+}
+
+func TestRuns(t *testing.T) {
+	day := func(d, h int) time.Time { return time.Date(2026, 11, d, h, 0, 0, 0, time.Local) }
+	sc := store.Schedule{Times: map[store.Kind][]string{store.KindVideo: {"20:00", "09:00"}}}
+	got := Runs(sc, store.KindVideo, day(10, 12), 4)
+	want := []time.Time{day(10, 20), day(11, 9), day(11, 20), day(12, 9)}
+	if !slices.Equal(got, want) {
+		t.Errorf("Runs = %v, want %v", got, want)
+	}
+	if got := Runs(sc, store.KindArticle, day(10, 12), 4); len(got) != 0 {
+		t.Errorf("Runs without times = %v", got)
 	}
 }
 

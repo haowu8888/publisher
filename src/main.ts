@@ -3,7 +3,7 @@
 // each view re-renders from it; Go pushes task and account changes as events.
 import { onFileDrop } from "mygo-runtime";
 import { Accounts, Library, Publisher, Scheduler, Settings, Updates, events } from "./mygo";
-import type { AccountInfo, FolderInfo, Material, ScheduleInfo, SettingsInfo, SyncInfo, Task, UpdateState } from "./mygo";
+import type { AccountInfo, FolderInfo, Material, PendingMaterial, ScheduleInfo, SettingsInfo, SyncInfo, Task, UpdateState } from "./mygo";
 
 type View = "library" | "accounts" | "tasks" | "schedule" | "settings";
 
@@ -292,7 +292,8 @@ function materialItem(m: Material, before?: string, after?: string, first?: stri
       ? `<span class="state ok">已发布</span>`
       : `<span class="state">未发布</span>`;
   // The order buttons sit over the item, not in it: buttons can't nest.
-  return `<div class="mat-row"><button class="mat-item ${m.id === state.selected ? "active" : ""}" data-select="${m.id}">
+  const drag = first ? ` draggable="true" data-drag="${m.id}" title="拖动调整定时发布的顺序"` : "";
+  return `<div class="mat-row"${drag}><button class="mat-item ${m.id === state.selected ? "active" : ""}" data-select="${m.id}">
     <span class="kind ${m.kind}">${m.kind === "video" ? "视频" : "文章"}</span>
     <span style="min-width:0"><span class="t">${esc(m.title || "（无标题）")}</span>
     <span class="dots">${tag}${pills}</span></span>
@@ -885,37 +886,122 @@ function nextText(info: ScheduleInfo, k: string) {
 }
 
 // pendingSection lists the materials waiting for the schedule, one kind at
-// a time as the library does. The next run of a kind takes its first ones.
+// a time as the library does, in the batches the coming runs take them in.
 function pendingSection(info: ScheduleInfo) {
   const per = info.schedule.kindPerRun?.[state.kind] || 1;
   const count = (k: string) => info.pending.filter((p) => p.kind === k).length;
-  const list = info.pending.filter((p) => p.kind === state.kind).map((p, i) => ({ ...p, next: i < per }));
+  const list = info.pending.filter((p) => p.kind === state.kind);
   const tab = (k: string, label: string) =>
     `<button class="${state.kind === k ? "active" : ""}" data-act="kind" data-kind="${k}">${label} <small>${count(k)}</small></button>`;
+  const off = !info.next?.[state.kind] || info.next[state.kind]!.startsWith("0001");
   return `
     <div class="row"><h3>待发布素材（${info.pending.length}）</h3>
       <div class="kind-tabs inline">${tab("video", "视频")}${tab("article", "文章")}</div></div>
     ${
       list.length === 0
-        ? `<div class="muted">没有待发布的${state.kind === "video" ? "视频" : "文章"}。导入新素材，或在上面勾选要发布的平台。</div>`
-        : `<ol class="pending scroll" data-kind="${state.kind}">${list
-            .map(
-              (p, i) => `<li><span class="kind ${p.kind}">${p.kind === "video" ? "视频" : "文章"}</span>
-                <span class="t">${esc(p.title || "（无标题）")}</span>
-                <span class="muted"><small>${p.platforms.map(platformName).join("、")}</small></span>
-                ${p.next ? `<span class="pill info">下一批</span>` : ""}
-                <span class="moves">${moveButton(p.id, list[0]?.id, false, i > 0, "置顶", "移到最前，下一批先发")}${moveButton(
-                  p.id,
-                  list[i - 1]?.id,
-                  false,
-                  i > 0,
-                  "↑",
-                  "上移",
-                )}${moveButton(p.id, list[i + 1]?.id, true, i < list.length - 1, "↓", "下移")}</span></li>`,
-            )
-            .join("")}</ol>`
+        ? `<div class="muted">没有待发布的${kindLabel(state.kind)}。导入新素材，或在上面勾选要发布的平台。</div>`
+        : `${off ? `<div class="muted"><small>定时发布${info.schedule.enabled ? `没设${kindLabel(state.kind)}的时间` : "未启用"}，下面是启用后的顺序。</small></div>` : ""}
+          <ol class="pending scroll" data-kind="${state.kind}">${list.map((p, i) => pendingItem(p, list, i, per)).join("")}</ol>`
     }`;
 }
+
+// pendingItem draws one waiting material, list being its kind's, which
+// runs take per at a time; the first of each run shows when it is.
+function pendingItem(p: PendingMaterial, list: PendingMaterial[], i: number, per: number) {
+  const first = i % per === 0;
+  const [day, hm] = p.at ? whenText(p.at).split(" ") : [`第 ${Math.floor(i / per) + 1} 批`, ""];
+  const meta = [
+    p.file && `<span title="${esc(p.file)}">${esc(p.file)}</span>`,
+    p.images && `${p.images} 张图`,
+    `<span title="${esc(p.platforms.map(platformName).join("、"))}">${p.platforms.length} 个平台</span>`,
+  ].filter(Boolean);
+  return `<li class="pend ${first && i > 0 ? "run" : ""}" draggable="true" data-drag="${p.id}">
+    <span class="grip" title="拖动调整顺序">⋮⋮</span>
+    <span class="when ${i < per ? "next" : ""}">${first ? `${esc(day!)}<b>${esc(hm ?? "")}</b>` : ""}</span>
+    ${p.cover ? `<img class="thumb" src="${esc(p.cover)}" loading="lazy" alt="" />` : `<span class="thumb kind ${p.kind}">${kindLabel(p.kind)}</span>`}
+    <span class="info">
+      <button class="link t" data-open="${p.id}" title="在素材库中打开">${esc(p.title || "（无标题）")}</button>
+      ${p.summary ? `<span class="sum">${esc(p.summary)}</span>` : ""}
+      <span class="meta">${(p.tags ?? [])
+        .slice(0, 6)
+        .map((t) => `<span class="tag">#${esc(t)}</span>`)
+        .join("")}${meta.map((m) => `<span>${m}</span>`).join("")}</span>
+    </span>
+    <span class="moves">${moveButton(p.id, list[0]?.id, false, i > 0, "置顶", "移到最前，下一批先发")}${moveButton(
+      p.id,
+      list[i - 1]?.id,
+      false,
+      i > 0,
+      "↑",
+      "上移",
+    )}${moveButton(p.id, list[i + 1]?.id, true, i < list.length - 1, "↓", "下移")}</span></li>`;
+}
+
+// whenText is a coming time as 今天 20:00, 明天 12:00 or 11/28 09:30.
+function whenText(iso: string) {
+  const d = new Date(iso);
+  const days = Math.round((new Date(d).setHours(0, 0, 0, 0) - new Date().setHours(0, 0, 0, 0)) / 86400000);
+  const hm = d.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false });
+  const day = ["今天", "明天", "后天"][days] ?? d.toLocaleDateString("zh-CN", { month: "numeric", day: "numeric" });
+  return `${day} ${hm}`;
+}
+
+// moveMaterial puts the material id just before target in import order,
+// or after it, and draws the library or the pending list again.
+async function moveMaterial(id: string, target: string, after: boolean) {
+  if (!(await attempt(() => Library.move(id, target, after).then(() => true)))) return;
+  // The library and the schedule show the same order.
+  state.materials = await Library.list();
+  if (state.view === "library") return render();
+  const info = await attempt(() => Scheduler.get());
+  if (!info) return;
+  state.schedule = info;
+  const top = document.querySelector<HTMLElement>("ol.pending")?.scrollTop ?? 0;
+  $("#pending").innerHTML = pendingSection(info);
+  const list = document.querySelector<HTMLElement>("ol.pending");
+  if (list) list.scrollTop = top;
+}
+
+// Dragging an item with data-drag onto another of the same list moves it
+// before or after that one, by which half the pointer is over.
+let dragged: HTMLElement | undefined;
+const dropTarget = (e: DragEvent) => {
+  const el = (e.target as HTMLElement).closest<HTMLElement>("[data-drag]");
+  return dragged && el && el !== dragged && el.parentElement === dragged.parentElement ? el : undefined;
+};
+const dropAfter = (e: DragEvent, el: HTMLElement) => {
+  const r = el.getBoundingClientRect();
+  return e.clientY > r.top + r.height / 2;
+};
+const clearDrop = () => document.querySelectorAll(".drop-before, .drop-after").forEach((el) => el.classList.remove("drop-before", "drop-after"));
+view.addEventListener("dragstart", (e) => {
+  dragged = (e.target as HTMLElement).closest<HTMLElement>("[data-drag]") ?? undefined;
+  if (!dragged) return;
+  e.dataTransfer!.effectAllowed = "move";
+  e.dataTransfer!.setData("text/plain", dragged.dataset.drag!);
+  dragged.classList.add("dragging");
+});
+view.addEventListener("dragover", (e) => {
+  const el = dropTarget(e);
+  clearDrop();
+  if (!el) return;
+  e.preventDefault();
+  el.classList.add(dropAfter(e, el) ? "drop-after" : "drop-before");
+});
+view.addEventListener("drop", async (e) => {
+  const el = dropTarget(e);
+  clearDrop();
+  if (!el) return;
+  e.preventDefault();
+  const id = dragged!.dataset.drag!;
+  if (state.view === "library" && !(await keepEdits())) return;
+  await moveMaterial(id, el.dataset.drag!, dropAfter(e, el));
+});
+view.addEventListener("dragend", () => {
+  clearDrop();
+  dragged?.classList.remove("dragging");
+  dragged = undefined;
+});
 
 // moveButton puts the material id just before target in import order,
 // the order the schedule publishes in, or after it.
@@ -1294,6 +1380,10 @@ view.addEventListener("click", async (e) => {
     state.selected = d.select;
     return render();
   }
+  if (d.open) {
+    state.selected = d.open;
+    return setView("library");
+  }
   if (d.theme !== undefined) return saveSettings((s) => (s.settings.theme = d.theme));
   if (d.accent !== undefined) return saveUI({ accent: d.accent });
   if (d.style !== undefined) return saveUI({ style: d.style });
@@ -1426,21 +1516,9 @@ view.addEventListener("click", async (e) => {
       toast(info.schedule.enabled ? "已保存，定时发布已启用" : "已保存，定时发布未启用");
       return render();
     }
-    case "move": {
-      if (!d.id || !d.target) return;
-      if (!(await attempt(() => Library.move(d.id!, d.target!, !!d.after).then(() => true)))) return;
-      // The library and the schedule show the same order.
-      state.materials = await Library.list();
-      if (state.view === "library") return render();
-      const info = await attempt(() => Scheduler.get());
-      if (!info) return;
-      state.schedule = info;
-      const top = document.querySelector<HTMLElement>("ol.pending")?.scrollTop ?? 0;
-      $("#pending").innerHTML = pendingSection(info);
-      const list = document.querySelector<HTMLElement>("ol.pending");
-      if (list) list.scrollTop = top;
+    case "move":
+      if (d.id && d.target) await moveMaterial(d.id, d.target, !!d.after);
       return;
-    }
     case "run-schedule": {
       if (!(await ask("现在就全自动发布下一批素材？", { title: "立即发布下一批", ok: "发布" }))) return;
       const info = await attempt(() => Scheduler.runNow());

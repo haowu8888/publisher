@@ -90,6 +90,16 @@ export interface PendingMaterial {
   title: string;
   kind: Kind;
   platforms: string[];
+  /** At is the run that will publish it, if the schedule is on. */
+  at?: string;
+  /** Cover is where the page loads its cover from, if it has one. */
+  cover?: string;
+  /** Summary is the start of its description or text. */
+  summary?: string;
+  tags?: string[];
+  /** File is the name of its video or article file. */
+  file?: string;
+  images?: number;
 }
 
 export interface Schedule {

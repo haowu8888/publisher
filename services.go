@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -739,6 +740,16 @@ type PendingMaterial struct {
 	Title     string     `json:"title"`
 	Kind      store.Kind `json:"kind"`
 	Platforms []string   `json:"platforms"`
+	// At is the run that will publish it, if the schedule is on.
+	At time.Time `json:"at,omitzero"`
+	// Cover is where the page loads its cover from, if it has one.
+	Cover string `json:"cover,omitempty"`
+	// Summary is the start of its description or text.
+	Summary string   `json:"summary,omitempty"`
+	Tags    []string `json:"tags,omitempty"`
+	// File is the name of its video or article file.
+	File   string `json:"file,omitempty"`
+	Images int    `json:"images,omitempty"`
 }
 
 // Get returns the schedule.
@@ -751,10 +762,88 @@ func (x *Scheduler) info(sc store.Schedule) ScheduleInfo {
 			info.Next[k] = schedule.Next(sc, k, time.Now())
 		}
 	}
-	for _, m := range schedule.Pending(x.store, sc) {
-		info.Pending = append(info.Pending, PendingMaterial{ID: m.ID, Title: m.Title, Kind: m.Kind, Platforms: schedule.Targets(sc, m)})
+	pending := schedule.Pending(x.store, sc)
+	runs, seen := map[store.Kind][]time.Time{}, map[store.Kind]int{}
+	for _, k := range store.Kinds {
+		if !info.Next[k].IsZero() {
+			runs[k] = schedule.Runs(sc, k, time.Now(), len(pending)/max(sc.PerRun[k], 1)+1)
+		}
+	}
+	for _, m := range pending {
+		p := PendingMaterial{ID: m.ID, Title: m.Title, Kind: m.Kind, Platforms: schedule.Targets(sc, m),
+			Cover: coverURL(m), Summary: summary(m), Tags: m.Tags, File: filepath.Base(m.VideoPath + m.ArticlePath), Images: len(m.Images)}
+		if r := runs[m.Kind]; len(r) > 0 {
+			p.At = r[min(seen[m.Kind]/max(sc.PerRun[m.Kind], 1), len(r)-1)]
+		}
+		seen[m.Kind]++
+		info.Pending = append(info.Pending, p)
 	}
 	return info
+}
+
+// coverURL is where the page loads m's cover from, the cover scheme
+// (main), which WebView2 serves as http://cover.localhost, or "" if it has
+// none. The file's name keeps a changed cover from showing the old one.
+func coverURL(m store.Material) string {
+	if coverFile(m) == "" {
+		return ""
+	}
+	base := "cover://localhost/"
+	if runtime.GOOS == "windows" {
+		base = "http://cover.localhost/"
+	}
+	return base + url.PathEscape(m.ID) + "?" + url.QueryEscape(filepath.Base(coverFile(m)))
+}
+
+// coverFile is m's cover, or for an article without one its first picture.
+func coverFile(m store.Material) string {
+	if m.CoverPath == "" && len(m.Images) > 0 {
+		return m.Images[0]
+	}
+	return m.CoverPath
+}
+
+// serveCover serves the cover of the material whose id is the path, and
+// no other file.
+func serveCover(s *store.Store) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		m, err := s.Material(strings.TrimPrefix(r.URL.Path, "/"))
+		if err != nil || coverFile(m) == "" {
+			http.NotFound(w, r)
+			return
+		}
+		http.ServeFile(w, r, coverFile(m))
+	})
+}
+
+// summaryLen is how much of a material's text the pending list shows.
+const summaryLen = 80
+
+// summary is the start of m's description, or of an article's text
+// without its Markdown pictures, headings and code.
+func summary(m store.Material) string {
+	text := m.Description
+	if m.Kind == store.KindArticle {
+		var lines []string
+		code := false
+		for _, l := range strings.Split(m.Body, "\n") {
+			l = strings.TrimSpace(l)
+			if strings.HasPrefix(l, "```") {
+				code = !code
+				continue
+			}
+			if code || l == "" || strings.HasPrefix(l, "!") || strings.HasPrefix(l, "<") {
+				continue
+			}
+			lines = append(lines, strings.TrimLeft(l, "#>-*0123456789. "))
+		}
+		text = strings.Join(lines, " ")
+	}
+	text = strings.Join(strings.Fields(text), " ")
+	if r := []rune(text); len(r) > summaryLen {
+		text = string(r[:summaryLen]) + "…"
+	}
+	return text
 }
 
 // Save replaces the schedule's settings. Times already past today do not

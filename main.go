@@ -55,6 +55,9 @@ func main() {
 	if err := mygo.Protocol.Handle("bg", mygo.FileServer(os.DirFS(settings.backgroundsDir()))); err != nil {
 		log.Println("bg:", err)
 	}
+	if err := mygo.Protocol.Handle("cover", serveCover(s)); err != nil {
+		log.Println("cover:", err)
+	}
 	updates := &Updates{store: s}
 	mygo.Bind(updates)
 	go updates.watch()

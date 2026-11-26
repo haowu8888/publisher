@@ -100,8 +100,7 @@ func publishBilibili(ctx context.Context, b *browser.Browser, j Job) error {
 	if err != nil {
 		return fmt.Errorf("未找到投稿按钮: %w", err)
 	}
-	browser.Show(page)
-	if err := submit.Click("left", 1); err != nil {
+	if err := realClick(page, submit); err != nil {
 		return err
 	}
 	if _, err := findR(page, "*", "稿件投递成功|投稿成功", 60*time.Second); err != nil {
