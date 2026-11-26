@@ -3,8 +3,10 @@ package platforms
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"publisher/internal/browser"
 	"publisher/internal/store"
@@ -52,7 +54,7 @@ func publishKuaishou(ctx context.Context, b *browser.Browser, j Job) error {
 	if !strings.Contains(text, strings.TrimSpace(m.Title)) {
 		text = strings.TrimSpace(m.Title + "\n" + text)
 	}
-	if err := typeInto(page, editor, kuaishouLimits.fitText(text, m.Tags)+" "); err != nil {
+	if err := typeInto(page, editor, kuaishouFit(text, m.Tags)+" "); err != nil {
 		return err
 	}
 	for i, tag := range m.Tags {
@@ -200,4 +202,21 @@ func kuaishouCover(ctx context.Context, page *rod.Page, path string) error {
 		return err
 	}
 	return waitGone(ctx, page, ".ant-modal", 30*time.Second)
+}
+
+var blankLines = regexp.MustCompile(`\n{3,}`)
+
+// kuaishouFit is fitText for Kuaishou, whose count is the editor's text,
+// where an empty line takes two characters: a description with two empty
+// lines came out 2 over and was refused (作品描述超过字数限制). It keeps at
+// most one empty line in a row.
+func kuaishouFit(text string, tags []string) string {
+	text = blankLines.ReplaceAllString(text, "\n\n")
+	n := kuaishouLimits.textRoom(tags)
+	s := cutText(text, n)
+	for m := n; m > 0 && utf8.RuneCountInString(s)+strings.Count(s, "\n\n") > n; {
+		m--
+		s = cutText(text, m)
+	}
+	return s
 }

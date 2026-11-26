@@ -1,8 +1,10 @@
 package platforms
 
 import (
+	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/go-rod/rod/lib/proto"
 
@@ -156,5 +158,40 @@ func TestLasting(t *testing.T) {
 	}
 	if got[1].Domain != "" || got[1].URL != "https://mp.163.com/" {
 		t.Errorf("host-only cookie: %+v", got[1])
+	}
+}
+
+func TestCutText(t *testing.T) {
+	for _, c := range []struct {
+		text string
+		n    int
+		want string
+	}{
+		{"短文", 5, "短文"},
+		{"来源：\nhttps://a.com/xyz", 12, "来源："},
+		{"来源：\nhttps://a.com/xyz\n下一行", 21, "来源：\nhttps://a.com/xyz"},
+		{"一二三四五六", 3, "一二三"},
+	} {
+		if got := cutText(c.text, c.n); got != c.want {
+			t.Errorf("cutText(%q, %d) = %q, want %q", c.text, c.n, got, c.want)
+		}
+	}
+}
+
+func TestKuaishouFit(t *testing.T) {
+	text := "标题\n" + strings.Repeat("字", 600) + "\n\n\n来源：\nhttps://a.com/x"
+	tags := []string{"AI", "人工智能"}
+	got := kuaishouFit(text, tags)
+	// What the page counts: an empty line is two characters.
+	n := utf8.RuneCountInString(got) + strings.Count(got, "\n\n") + 1
+	for _, tag := range tags {
+		n += utf8.RuneCountInString(tag) + 2
+	}
+	if n > kuaishouLimits.Text {
+		t.Errorf("kuaishouFit gives %d characters with the tags, over %d", n, kuaishouLimits.Text)
+	}
+	short := "标题\n简介\n\n\n\n来源：\nhttps://a.com/x"
+	if got := kuaishouFit(short, tags); got != "标题\n简介\n\n来源：\nhttps://a.com/x" {
+		t.Errorf("kuaishouFit(%q) = %q", short, got)
 	}
 }

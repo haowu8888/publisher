@@ -82,7 +82,7 @@ func newMaterial(p string, im store.Import) (store.Material, bool, error) {
 			}
 		}
 	case slices.Contains(articleExts, ext):
-		if ext == "txt" && r.isCaption(p) {
+		if r.isCaption(p) {
 			return m, false, nil
 		}
 		b, err := os.ReadFile(p)
@@ -191,13 +191,14 @@ func (r rules) readCaption(p string) (caption, bool) {
 	return caption{}, false
 }
 
-// isCaption reports whether the text file at p is the caption of a video
-// beside it, where readCaption looks for one, and so no article: dropped
-// on the window with its video, it would be published as one. That holds
-// with captions unread too.
+// isCaption reports whether the text file at p goes with a video beside
+// it, and so is no article: its caption, where readCaption looks for one,
+// or notes named after it, as "x.来源.md" for "x.mp4". Dropped on the
+// window or synced with its video, it would be published as one. That
+// holds with captions unread too.
 func (r rules) isCaption(p string) bool {
 	stem := strings.TrimSuffix(p, filepath.Ext(p))
-	for _, video := range []string{stem, strings.TrimSuffix(stem, r.CaptionSuffix)} {
+	for _, video := range []string{stem, strings.TrimSuffix(stem, r.CaptionSuffix), strings.TrimSuffix(stem, filepath.Ext(stem))} {
 		for _, ext := range videoExts {
 			if _, err := os.Stat(video + "." + ext); err == nil {
 				return true

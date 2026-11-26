@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"publisher/internal/browser"
@@ -117,11 +118,33 @@ type Limits struct {
 
 // fitText shortens text to leave room for the tags that follow it.
 func (l Limits) fitText(text string, tags []string) string {
+	return cutText(text, l.textRoom(tags))
+}
+
+// textRoom is how many characters fitText leaves the text.
+func (l Limits) textRoom(tags []string) int {
 	n := l.Text - 1
 	for _, t := range tags[:min(len(tags), l.Tags)] {
 		n -= utf8.RuneCountInString(t) + 2
 	}
-	return truncate(text, max(n, 0))
+	return max(n, 0)
+}
+
+// cutText shortens text to n characters like truncate, but leaves out a
+// link the cut would end in the middle of, which would lead nowhere.
+func cutText(text string, n int) string {
+	r := []rune(text)
+	if len(r) <= n {
+		return text
+	}
+	s := string(r[:n])
+	if !unicode.IsSpace(r[n]) {
+		i := strings.LastIndexFunc(s, unicode.IsSpace) + 1
+		if strings.Contains(s[i:], "://") {
+			s = strings.TrimRightFunc(s[:i], unicode.IsSpace)
+		}
+	}
+	return s
 }
 
 var (

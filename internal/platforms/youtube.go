@@ -68,23 +68,32 @@ func publishYoutube(ctx context.Context, b *browser.Browser, j Job) error {
 			return err
 		}
 	}
-	note, err := setCover(ctx, page, j, ytThumbnail)
-	if err != nil {
-		return err
+	// Not setCover: the Escape it presses after a failure closes the
+	// whole upload dialog, leaving the video a draft.
+	note := ""
+	if m.CoverPath != "" {
+		j.Report("设置缩略图")
+		if err := ytThumbnail(ctx, page, m.CoverPath); err != nil {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			note = "（缩略图没设上，用的是 YouTube 自动生成的：" + err.Error() + "）"
+		}
 	}
 	j.Report("选择观众和其他设置")
 	if err := ytRadio(page, "VIDEO_MADE_FOR_KIDS_NOT_MFK"); err != nil {
 		if e := ytDialogError(page); e != "" {
 			return fmt.Errorf("YouTube 提示：%s", e)
 		}
-		// Seen once the channel had uploaded many videos that day: the
-		// dialog closed by itself after the file was given.
-		if res, e := page.Timeout(evalTimeout).Eval(`() => !!document.querySelector("ytcp-uploads-dialog tp-yt-paper-dialog")?.getClientRects().length`); e == nil && !res.Value.Bool() {
-			return errors.New("YouTube 的上传对话框自己关掉了，可能是今天上传次数到了上限（没做电话验证的账号上限更低），请在 Studio 里看看")
+		if ytClosed(page) {
+			return errClosedDialog
 		}
 		return fmt.Errorf("「不是面向儿童的内容」%w", err)
 	}
 	if err := clickVisible(ctx, page, `ytcp-uploads-dialog #toggle-button`, "", 5*time.Second); err != nil {
+		if ytClosed(page) {
+			return errClosedDialog
+		}
 		return errors.New("未找到「展开」按钮")
 	}
 	if err := sleep(ctx, time.Second); err != nil {
@@ -92,6 +101,9 @@ func publishYoutube(ctx context.Context, b *browser.Browser, j Job) error {
 	}
 	if len(m.Tags) > 0 {
 		if err := ytTags(ctx, page, m.Tags); err != nil {
+			if ytClosed(page) {
+				return errClosedDialog
+			}
 			return err
 		}
 	}
@@ -108,6 +120,9 @@ func publishYoutube(ctx context.Context, b *browser.Browser, j Job) error {
 		if err := clickVisible(ctx, page, `ytcp-uploads-dialog #next-button`, "", 10*time.Second); err != nil {
 			if e := ytDialogError(page); e != "" {
 				return fmt.Errorf("YouTube 提示：%s", e)
+			}
+			if ytClosed(page) {
+				return errClosedDialog
 			}
 			return errors.New("未找到「下一步」按钮")
 		}
@@ -218,6 +233,17 @@ func ytDialogError(page *rod.Page) string {
 		return ""
 	}
 	return res.Value.Str()
+}
+
+// errClosedDialog is the error once the upload dialog has closed by
+// itself, seen after the channel had uploaded many videos that day. A
+// video uploaded by then stays in Studio as a draft.
+var errClosedDialog = errors.New("YouTube 的上传对话框自己关掉了，可能是今天上传次数到了上限（没做电话验证的账号上限更低）；已传上的视频会留在 Studio 里成为草稿，请在 Studio 里看看")
+
+// ytClosed tells whether the upload dialog is no longer shown.
+func ytClosed(page *rod.Page) bool {
+	res, err := page.Timeout(evalTimeout).Eval(`() => !document.querySelector("ytcp-uploads-dialog tp-yt-paper-dialog")?.getClientRects().length`)
+	return err == nil && res.Value.Bool()
 }
 
 // ytText leaves out the angle brackets YouTube refuses in titles and

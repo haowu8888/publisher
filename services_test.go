@@ -14,7 +14,7 @@ import (
 // its articles in the order they were made, whatever their names.
 func TestNewFiles(t *testing.T) {
 	dir := t.TempDir()
-	for _, name := range []string{"甲.md", "ep10.mp4", "乙.md", "ep2.mp4", "notes.txt"} {
+	for _, name := range []string{"甲.md", "ep10.mp4", "乙.md", "ep2.mp4", "notes.txt", "ep2.来源.md"} {
 		if err := os.WriteFile(filepath.Join(dir, name), nil, 0o644); err != nil {
 			t.Fatal(err)
 		}
@@ -26,6 +26,7 @@ func TestNewFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 	l := &Library{store: s}
+	// ep2.来源.md goes with its video, and is no article.
 	// Written just now, they are not for the schedule's own sync yet.
 	if files, err := l.newFiles(dir, time.Minute); err != nil || len(files) != 0 {
 		t.Errorf("fresh files: %q, %v", files, err)

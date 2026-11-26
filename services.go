@@ -189,9 +189,12 @@ func (l *Library) sync(settle bool) ([]store.Material, error) {
 	for _, dir := range l.store.Folders() {
 		files, _ := l.newFiles(dir, quiet)
 		for _, p := range files {
-			m, _, err := newMaterial(p, im)
+			m, ok, err := newMaterial(p, im)
 			if err != nil {
 				failed = append(failed, err.Error())
+				continue
+			}
+			if !ok {
 				continue
 			}
 			added = append(added, m)
@@ -221,7 +224,8 @@ func fresh(p string, quiet time.Duration, r rules) bool {
 
 // newFiles lists the files in dir, not its subfolders, to add on syncing,
 // but for those changed within quiet, in the order of the settings' rules.
-// Text files are left out: beside videos they are captions.
+// Text files are left out: beside videos they are captions. So are
+// Markdown files that go with a video, as its "x.来源.md".
 func (l *Library) newFiles(dir string, quiet time.Duration) ([]string, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -237,7 +241,7 @@ func (l *Library) newFiles(dir string, quiet time.Duration) ([]string, error) {
 			continue
 		}
 		isVideo := slices.Contains(videoExts, ext)
-		if !isVideo && ext != "md" && ext != "markdown" {
+		if !isVideo && (ext != "md" && ext != "markdown" || r.isCaption(p)) {
 			continue
 		}
 		if info, err := e.Info(); err == nil {
